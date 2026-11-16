@@ -1,13 +1,52 @@
 import { useState } from 'react';
-import { Check, Copy } from 'lucide-react';
-import type { ProductionSequence } from '../types/studio';
+import {
+  Camera,
+  Check,
+  Copy,
+  Lightbulb,
+  Sparkles,
+  Star,
+  Sun,
+  Volume2,
+} from 'lucide-react';
+import type {
+  DirectorialEnhancement,
+  ProductionSequence,
+  StudioIntelligenceReport,
+} from '../types/studio';
 
 interface VisionViewProps {
   sequence: ProductionSequence;
+  continuityBible: string;
+  intelligence: StudioIntelligenceReport;
+  onRateSequence: (rating: number, note: string) => Promise<void>;
+  onApplyEnhancement: (snippet: string) => Promise<void>;
 }
 
-export function VisionView({ sequence }: VisionViewProps) {
+const CATEGORY_META: Record<
+  DirectorialEnhancement['category'],
+  { label: string; icon: typeof Camera }
+> = {
+  camera: { label: 'Cámara y Óptica', icon: Camera },
+  lighting: { label: 'Iluminación', icon: Sun },
+  sound: { label: 'Diseño Sonoro', icon: Volume2 },
+};
+
+export function VisionView({
+  sequence,
+  continuityBible,
+  intelligence,
+  onRateSequence,
+  onApplyEnhancement,
+}: VisionViewProps) {
   const [copiedHex, setCopiedHex] = useState<string | null>(null);
+  const [selectedRating, setSelectedRating] = useState<number>(
+    sequence.sequenceRating || 5
+  );
+  const [ratingNote, setRatingNote] = useState('');
+  const [savingRating, setSavingRating] = useState(false);
+  const [ratingSavedMsg, setRatingSavedMsg] = useState<string | null>(null);
+  const [applyingId, setApplyingId] = useState<string | null>(null);
 
   async function handleCopyHex(hex: string) {
     try {
@@ -16,6 +55,33 @@ export function VisionView({ sequence }: VisionViewProps) {
       setTimeout(() => setCopiedHex(null), 1400);
     } catch {
       // Clipboard blocked in non-secure context; ignore silently
+    }
+  }
+
+  async function handleSubmitRating(e: React.FormEvent) {
+    e.preventDefault();
+    setSavingRating(true);
+    setRatingSavedMsg(null);
+    try {
+      await onRateSequence(selectedRating, ratingNote);
+      setRatingNote('');
+      setRatingSavedMsg(
+        selectedRating >= 4
+          ? 'Elecciones registradas en Studio Intelligence para futuras secuencias.'
+          : 'Valoración guardada en la secuencia.'
+      );
+      setTimeout(() => setRatingSavedMsg(null), 3500);
+    } finally {
+      setSavingRating(false);
+    }
+  }
+
+  async function handleApply(enhancement: DirectorialEnhancement) {
+    setApplyingId(enhancement.id);
+    try {
+      await onApplyEnhancement(enhancement.continuitySnippet);
+    } finally {
+      setApplyingId(null);
     }
   }
 
@@ -184,6 +250,205 @@ export function VisionView({ sequence }: VisionViewProps) {
             </div>
           </div>
         </div>
+      </section>
+
+      {/* Studio Intelligence & Suggested Directorial Enhancements */}
+      <section
+        aria-labelledby="studio-intelligence-heading"
+        className="pt-6 border-t border-white/10 space-y-5"
+      >
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="flex items-center gap-2">
+            <Lightbulb className="w-4 h-4 text-[#E5A93C]" />
+            <h3
+              id="studio-intelligence-heading"
+              className="font-display text-sm font-semibold text-[#E5A93C]"
+            >
+              05. Studio Intelligence — Mejoras de Dirección Sugeridas
+            </h3>
+          </div>
+          <div className="text-xs font-mono-tech text-[#8D8981] tabular-nums">
+            {intelligence.totalTrackedOutcomes} resultados exitosos registrados ·{' '}
+            {intelligence.finalizedSequencesCount} versiones finales
+          </div>
+        </div>
+
+        {/* Cross-project Pattern Benchmarks */}
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <div className="p-4 rounded-xl border border-white/10 bg-[#111116] space-y-2">
+            <div className="text-xs font-medium text-[#C8C3BA] flex items-center gap-1.5">
+              <Camera className="w-3.5 h-3.5 text-[#E5A93C]" />
+              <span>Cámara de Mayor Rendimiento</span>
+            </div>
+            {intelligence.topCameraPatterns[0] ? (
+              <>
+                <div className="text-xs font-semibold text-[#F2F0EB]">
+                  {intelligence.topCameraPatterns[0].label}
+                </div>
+                <div className="text-[11px] font-mono-tech text-[#8D8981] tabular-nums">
+                  {intelligence.topCameraPatterns[0].avgRating}/5 ★ ·{' '}
+                  {intelligence.topCameraPatterns[0].occurrences} reg.
+                </div>
+              </>
+            ) : (
+              <div className="text-xs text-[#7D7971]">Sin métricas suficientes aún</div>
+            )}
+          </div>
+
+          <div className="p-4 rounded-xl border border-white/10 bg-[#111116] space-y-2">
+            <div className="text-xs font-medium text-[#C8C3BA] flex items-center gap-1.5">
+              <Sun className="w-3.5 h-3.5 text-[#E5A93C]" />
+              <span>Iluminación Probada</span>
+            </div>
+            {intelligence.topLightingSetups[0] ? (
+              <>
+                <div className="text-xs font-semibold text-[#F2F0EB]">
+                  {intelligence.topLightingSetups[0].label}
+                </div>
+                <div className="text-[11px] font-mono-tech text-[#8D8981] tabular-nums">
+                  {intelligence.topLightingSetups[0].avgRating}/5 ★ ·{' '}
+                  {intelligence.topLightingSetups[0].occurrences} reg.
+                </div>
+              </>
+            ) : (
+              <div className="text-xs text-[#7D7971]">Sin métricas suficientes aún</div>
+            )}
+          </div>
+
+          <div className="p-4 rounded-xl border border-white/10 bg-[#111116] space-y-2">
+            <div className="text-xs font-medium text-[#C8C3BA] flex items-center gap-1.5">
+              <Volume2 className="w-3.5 h-3.5 text-[#E5A93C]" />
+              <span>Paisaje Sonoro Destacado</span>
+            </div>
+            {intelligence.topSoundscapes[0] ? (
+              <>
+                <div className="text-xs font-semibold text-[#F2F0EB]">
+                  {intelligence.topSoundscapes[0].label}
+                </div>
+                <div className="text-[11px] font-mono-tech text-[#8D8981] tabular-nums">
+                  {intelligence.topSoundscapes[0].avgRating}/5 ★ ·{' '}
+                  {intelligence.topSoundscapes[0].occurrences} reg.
+                </div>
+              </>
+            ) : (
+              <div className="text-xs text-[#7D7971]">Sin métricas suficientes aún</div>
+            )}
+          </div>
+        </div>
+
+        {/* Suggested Directorial Enhancements */}
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          {intelligence.enhancements.map((enh) => {
+            const meta = CATEGORY_META[enh.category];
+            const Icon = meta.icon;
+            const alreadyApplied = continuityBible.includes(enh.continuitySnippet);
+            const isApplying = applyingId === enh.id;
+
+            return (
+              <article
+                key={enh.id}
+                className="p-4 rounded-xl border border-white/10 bg-[#131318] flex flex-col justify-between gap-3"
+              >
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between gap-2 text-[11px] font-mono-tech">
+                    <span className="inline-flex items-center gap-1.5 text-[#E5A93C] font-medium">
+                      <Icon className="w-3.5 h-3.5" />
+                      <span>{meta.label}</span>
+                    </span>
+                    <span className="text-[#8D8981] tabular-nums">
+                      {enh.confidenceScore}% afín
+                    </span>
+                  </div>
+                  <h4 className="text-sm font-semibold text-[#F2F0EB] leading-snug">
+                    {enh.title}
+                  </h4>
+                  <p className="text-xs text-[#D4CFC7] leading-relaxed">
+                    {enh.recommendation}
+                  </p>
+                  <p className="text-[11px] text-[#8D8981] leading-relaxed">
+                    {enh.rationale}
+                  </p>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => handleApply(enh)}
+                  disabled={alreadyApplied || isApplying}
+                  className={`w-full inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg border text-xs font-medium transition-colors ${
+                    alreadyApplied
+                      ? 'border-[#38B2AC]/35 bg-[#102625] text-[#5EEAD4]'
+                      : 'border-white/12 bg-[#1A1A22] hover:bg-[#23232E] text-[#F2F0EB]'
+                  }`}
+                >
+                  {alreadyApplied ? (
+                    <>
+                      <Check className="w-3.5 h-3.5" />
+                      <span>Aplicada en Biblia</span>
+                    </>
+                  ) : (
+                    <>
+                      <Sparkles className="w-3.5 h-3.5 text-[#E5A93C]" />
+                      <span>{isApplying ? 'Aplicando...' : 'Aplicar a Biblia'}</span>
+                    </>
+                  )}
+                </button>
+              </article>
+            );
+          })}
+        </div>
+
+        {/* Rate Current Sequence Choices to Feed Studio Intelligence */}
+        <form
+          onSubmit={handleSubmitRating}
+          className="p-4 rounded-xl border border-white/10 bg-[#0F0F14] flex flex-col lg:flex-row lg:items-end justify-between gap-3"
+        >
+          <div className="space-y-1.5 flex-1">
+            <div className="text-xs font-semibold text-[#F2F0EB] flex items-center gap-1.5">
+              <Star className="w-3.5 h-3.5 text-[#E5A93C]" />
+              <span>Evaluar elecciones de esta secuencia para alimentar Studio Intelligence</span>
+            </div>
+            <div className="flex flex-wrap items-center gap-2">
+              <label htmlFor="sequence-rating-select" className="sr-only">
+                Valoración de la secuencia
+              </label>
+              <select
+                id="sequence-rating-select"
+                value={selectedRating}
+                onChange={(e) => setSelectedRating(Number(e.target.value))}
+                className="rounded-lg border border-white/12 bg-[#0B0B0E] px-3 py-2 text-xs text-[#F2F0EB] font-mono-tech focus:border-[#E5A93C] focus:outline-none"
+              >
+                <option value={5}>5 ★ — Sobresaliente (referencia)</option>
+                <option value={4}>4 ★ — Muy sólida</option>
+                <option value={3}>3 ★ — Aceptable</option>
+                <option value={2}>2 ★ — Mejorable</option>
+                <option value={1}>1 ★ — Descartar patrón</option>
+              </select>
+
+              <label htmlFor="sequence-rating-note" className="sr-only">
+                Nota sobre qué funcionó mejor
+              </label>
+              <input
+                id="sequence-rating-note"
+                type="text"
+                value={ratingNote}
+                onChange={(e) => setRatingNote(e.target.value)}
+                placeholder="Opcional: qué técnica destacó (ej. dolly lento + LFE 32Hz)..."
+                className="flex-1 min-w-[220px] rounded-lg border border-white/12 bg-[#0B0B0E] px-3 py-2 text-xs text-[#F2F0EB] placeholder:text-[#6E6A63] focus:border-[#E5A93C] focus:outline-none"
+              />
+            </div>
+            {ratingSavedMsg && (
+              <p className="text-[11px] text-[#5EEAD4]">{ratingSavedMsg}</p>
+            )}
+          </div>
+
+          <button
+            type="submit"
+            disabled={savingRating}
+            className="px-4 py-2 rounded-lg bg-[#E5A93C] hover:bg-[#EDA949] disabled:opacity-60 text-[#0B0B0E] text-xs font-semibold whitespace-nowrap shrink-0"
+          >
+            {savingRating ? 'Registrando...' : 'Registrar resultado'}
+          </button>
+        </form>
       </section>
     </div>
   );

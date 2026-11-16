@@ -1,4 +1,4 @@
-import { Search, FolderPlus, Layers, X } from 'lucide-react';
+import { Search, FolderPlus, Layers, Brain, X } from 'lucide-react';
 import type { ProductionProject } from '../types/studio';
 import {
   computeProjectStats,
@@ -10,10 +10,12 @@ interface ProjectSidebarProps {
   projects: ProductionProject[];
   activeProjectId: string;
   searchQuery: string;
+  lessonsCount: number;
   onSearchChange: (q: string) => void;
   onSelectProject: (id: string) => void;
   onOpenNewProject: () => void;
   onOpenAgentBlueprint: () => void;
+  onOpenLearning: () => void;
   mobileOpen: boolean;
   onCloseMobile: () => void;
 }
@@ -22,10 +24,12 @@ export function ProjectSidebar({
   projects,
   activeProjectId,
   searchQuery,
+  lessonsCount,
   onSearchChange,
   onSelectProject,
   onOpenNewProject,
   onOpenAgentBlueprint,
+  onOpenLearning,
   mobileOpen,
   onCloseMobile,
 }: ProjectSidebarProps) {
@@ -103,7 +107,7 @@ export function ProjectSidebar({
                 <div className="text-sm font-semibold leading-snug line-clamp-2">
                   {project.title}
                 </div>
-                <div className="mt-1.5 flex items-center gap-1.5 text-[11px] text-[#8D8981] font-mono-tech whitespace-nowrap overflow-hidden">
+                <div className="mt-1.5 flex items-center gap-1.5 text-[11px] text-[#8D8981] font-mono-tech whitespace-nowrap overflow-hidden tabular-nums">
                   <span className="truncate">
                     {project.defaultSourceType === 'book'
                       ? 'Libro'
@@ -122,10 +126,30 @@ export function ProjectSidebar({
         )}
       </div>
 
-      <div className="p-3 border-t border-white/10">
+      <div className="p-3 border-t border-white/10 space-y-2">
         <button
           type="button"
-          onClick={onOpenAgentBlueprint}
+          onClick={() => {
+            onOpenLearning();
+            onCloseMobile();
+          }}
+          className="w-full flex items-center justify-between gap-2 px-3 py-2.5 rounded-lg border border-white/10 bg-[#15151C] hover:bg-[#1C1C26] text-xs font-medium text-[#E6E2DA] transition-colors whitespace-nowrap"
+        >
+          <span className="inline-flex items-center gap-2">
+            <Brain className="w-3.5 h-3.5 text-[#E5A93C]" />
+            <span>Autoaprendizaje</span>
+          </span>
+          <span className="font-mono-tech text-[11px] text-[#8D8981] tabular-nums">
+            {lessonsCount}
+          </span>
+        </button>
+
+        <button
+          type="button"
+          onClick={() => {
+            onOpenAgentBlueprint();
+            onCloseMobile();
+          }}
           className="w-full flex items-center justify-center gap-2 px-3 py-2.5 rounded-lg border border-white/10 bg-[#15151C] hover:bg-[#1C1C26] text-xs font-medium text-[#E6E2DA] transition-colors whitespace-nowrap"
         >
           <Layers className="w-3.5 h-3.5 text-[#E5A93C]" />

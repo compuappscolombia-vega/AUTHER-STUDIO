@@ -7,46 +7,166 @@ import { fileURLToPath } from 'url';
 import { GoogleGenAI, ThinkingLevel, Type } from '@google/genai';
 import { SEED_PROJECTS } from './src/data/seedProjects';
 import type {
+  AudioAnalysisReport,
+  LearningCategory,
+  LearningLesson,
   ProductionProject,
   ProductionSequence,
+  ProjectAsset,
   SourceMaterialType,
 } from './src/types/studio';
 import { buildContinuationContext } from './src/utils/studioLogic';
+import {
+  buildLearningPromptContext,
+  extractAutomaticLessons,
+  validateLessonInput,
+} from './src/utils/learningEngine';
+import { buildRatedChoiceLessons } from './src/utils/studioIntelligence';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const PORT = Number(process.env.PORT) || 3000;
 const WORKSPACE_DIR = path.resolve(__dirname, 'workspace');
-const PROJECTS_FILE = path.join(WORKSPACE_DIR, 'projects.json');
+const PROJECTS_ROOT = path.join(WORKSPACE_DIR, 'projects');
+const LEARNING_FILE = path.join(WORKSPACE_DIR, 'learning_memory.json');
+
+const AUDIO_EXTENSIONS = new Set([
+  '.mp3',
+  '.wav',
+  '.m4a',
+  '.ogg',
+  '.aac',
+  '.flac',
+  '.webm',
+]);
 
 const upload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: 24 * 1024 * 1024 },
 });
 
-function ensureWorkspace(): ProductionProject[] {
-  if (!fs.existsSync(WORKSPACE_DIR)) {
-    fs.mkdirSync(WORKSPACE_DIR, { recursive: true });
-  }
-  if (!fs.existsSync(PROJECTS_FILE)) {
-    fs.writeFileSync(PROJECTS_FILE, JSON.stringify(SEED_PROJECTS, null, 2), 'utf-8');
+function sanitizeSlug(raw: string): string {
+  return raw.replace(/[^a-zA-Z0-9._-]/g, '_');
+}
+
+function getProjectDir(projectId: string): string {
+  const safeId = sanitizeSlug(projectId);
+  return path.join(PROJECTS_ROOT, safeId);
+}
+
+function getProjectJsonPath(projectId: string): string {
+  return path.join(getProjectDir(projectId), 'project.json');
+}
+
+function getProjectAssetsDir(projectId: string): string {
+  return path.join(getProjectDir(projectId), 'assets');
+}
+
+function writeProjectFolder(project: ProductionProject): void {
+  const dir = getProjectDir(project.id);
+  const assetsDir = getProjectAssetsDir(project.id);
+  fs.mkdirSync(assetsDir, { recursive: true });
+  fs.writeFileSync(getProjectJsonPath(project.id), JSON.stringify(project, null, 2), 'utf-8');
+}
+
+function ensureWorkspaceProjects(): ProductionProject[] {
+  fs.mkdirSync(PROJECTS_ROOT, { recursive: true });
+  const entries = fs.readdirSync(PROJECTS_ROOT, { withFileTypes: true });
+  const folders = entries.filter((e) => e.isDirectory());
+
+  if (folders.length === 0) {
+    for (const seed of SEED_PROJECTS) {
+      writeProjectFolder(seed);
+    }
     return SEED_PROJECTS;
   }
+
+  const projects: ProductionProject[] = [];
+  for (const folder of folders) {
+    const jsonPath = path.join(PROJECTS_ROOT, folder.name, 'project.json');
+    if (!fs.existsSync(jsonPath)) continue;
+    try {
+      const raw = fs.readFileSync(jsonPath, 'utf-8');
+      const parsed = JSON.parse(raw) as ProductionProject;
+      if (parsed && parsed.id) {
+        // Normalize versionStatus for backwards compatibility
+        parsed.sequences = (parsed.sequences || []).map((seq) => ({
+          ...seq,
+          versionStatus: seq.versionStatus === 'final' ? 'final' : 'draft',
+        }));
+        projects.push(parsed);
+      }
+    } catch {
+      // Skip malformed project file
+    }
+  }
+
+  if (projects.length === 0) {
+    for (const seed of SEED_PROJECTS) {
+      writeProjectFolder(seed);
+    }
+    return SEED_PROJECTS;
+  }
+
+  return projects.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+}
+
+function readProjectById(projectId: string): ProductionProject | null {
+  ensureWorkspaceProjects();
+  const jsonPath = getProjectJsonPath(projectId);
+  if (!fs.existsSync(jsonPath)) return null;
   try {
-    const raw = fs.readFileSync(PROJECTS_FILE, 'utf-8');
-    const parsed = JSON.parse(raw) as ProductionProject[];
-    return Array.isArray(parsed) && parsed.length > 0 ? parsed : SEED_PROJECTS;
+    const raw = fs.readFileSync(jsonPath, 'utf-8');
+    return JSON.parse(raw) as ProductionProject;
   } catch {
-    return SEED_PROJECTS;
+    return null;
   }
 }
 
-function saveProjects(projects: ProductionProject[]): void {
-  if (!fs.existsSync(WORKSPACE_DIR)) {
-    fs.mkdirSync(WORKSPACE_DIR, { recursive: true });
+const DEFAULT_LEARNING_LESSONS: LearningLesson[] = [
+  {
+    id: 'lesson-seed-01',
+    category: 'camera',
+    insight:
+      'En secuencias épicas IMAX 1.43:1, priorizar planos generales sostenidos (8–12s) con desplazamiento lento en Technocrane antes de cortar a primeros planos de 50mm.',
+    rating: 5,
+    sourceProjectTitle: 'El Libro de Enoc — La Vigilia del Hermón',
+    createdAt: '2025-05-10T10:00:00.000Z',
+  },
+  {
+    id: 'lesson-seed-02',
+    category: 'sound',
+    insight:
+      'Cuando el material fuente sea un audiolibro con pausas tensas, insertar beats explícitos de silencio dramático de 1.5s antes del golpe subgrave LFE (32–40 Hz).',
+    rating: 5,
+    sourceProjectTitle: 'La Última Frecuencia (Audiolibro)',
+    createdAt: '2025-05-12T15:00:00.000Z',
+  },
+];
+
+function ensureLearningMemory(): LearningLesson[] {
+  fs.mkdirSync(WORKSPACE_DIR, { recursive: true });
+  if (!fs.existsSync(LEARNING_FILE)) {
+    fs.writeFileSync(
+      LEARNING_FILE,
+      JSON.stringify(DEFAULT_LEARNING_LESSONS, null, 2),
+      'utf-8'
+    );
+    return DEFAULT_LEARNING_LESSONS;
   }
-  fs.writeFileSync(PROJECTS_FILE, JSON.stringify(projects, null, 2), 'utf-8');
+  try {
+    const raw = fs.readFileSync(LEARNING_FILE, 'utf-8');
+    const parsed = JSON.parse(raw) as LearningLesson[];
+    return Array.isArray(parsed) ? parsed : DEFAULT_LEARNING_LESSONS;
+  } catch {
+    return DEFAULT_LEARNING_LESSONS;
+  }
+}
+
+function saveLearningMemory(lessons: LearningLesson[]): void {
+  fs.mkdirSync(WORKSPACE_DIR, { recursive: true });
+  fs.writeFileSync(LEARNING_FILE, JSON.stringify(lessons, null, 2), 'utf-8');
 }
 
 function getGenAIClient(): GoogleGenAI {
@@ -66,16 +186,200 @@ function getGenAIClient(): GoogleGenAI {
   });
 }
 
+function inferMimeType(filename: string, providedMime: string): string {
+  const ext = path.extname(filename).toLowerCase();
+  if (ext === '.pdf') return 'application/pdf';
+  if (ext === '.mp3') return 'audio/mpeg';
+  if (ext === '.wav') return 'audio/wav';
+  if (ext === '.m4a') return 'audio/mp4';
+  if (ext === '.ogg') return 'audio/ogg';
+  if (ext === '.aac') return 'audio/aac';
+  if (ext === '.flac') return 'audio/flac';
+  if (ext === '.webm') return 'audio/webm';
+  return providedMime || 'application/octet-stream';
+}
+
+function isAudioFilename(filename: string): boolean {
+  return AUDIO_EXTENSIONS.has(path.extname(filename).toLowerCase());
+}
+
+function saveUploadedAsset(
+  project: ProductionProject,
+  file: Express.Multer.File
+): { updatedProject: ProductionProject; asset: ProjectAsset } {
+  const assetsDir = getProjectAssetsDir(project.id);
+  fs.mkdirSync(assetsDir, { recursive: true });
+  const ext = path.extname(file.originalname).toLowerCase();
+  const baseName = sanitizeSlug(path.basename(file.originalname, ext)).slice(0, 60);
+  const storedName = `${Date.now().toString(36)}-${baseName}${ext}`;
+  const fullPath = path.join(assetsDir, storedName);
+  fs.writeFileSync(fullPath, file.buffer);
+
+  const kind: ProjectAsset['kind'] = isAudioFilename(file.originalname)
+    ? 'audio'
+    : ext === '.jpg' || ext === '.jpeg' || ext === '.png' || ext === '.webp'
+      ? 'image'
+      : 'document';
+
+  const asset: ProjectAsset = {
+    id: `asset-${Date.now().toString(36)}`,
+    filename: file.originalname,
+    kind,
+    mimeType: inferMimeType(file.originalname, file.mimetype),
+    sizeBytes: file.size,
+    url: `/workspace-assets/${encodeURIComponent(project.id)}/${encodeURIComponent(storedName)}`,
+    createdAt: new Date().toISOString(),
+  };
+
+  const updatedProject: ProductionProject = {
+    ...project,
+    assets: [asset, ...(project.assets || [])],
+    updatedAt: new Date().toISOString(),
+  };
+  writeProjectFolder(updatedProject);
+  return { updatedProject, asset };
+}
+
+function saveGeneratedAssetBuffer(
+  project: ProductionProject,
+  params: {
+    baseName: string;
+    ext: string;
+    mimeType: string;
+    buffer: Buffer;
+    kind: ProjectAsset['kind'];
+  }
+): { updatedProject: ProductionProject; asset: ProjectAsset } {
+  const assetsDir = getProjectAssetsDir(project.id);
+  fs.mkdirSync(assetsDir, { recursive: true });
+  const safeBase = sanitizeSlug(params.baseName).slice(0, 50) || 'asset';
+  const storedName = `${Date.now().toString(36)}-${safeBase}${params.ext}`;
+  const fullPath = path.join(assetsDir, storedName);
+  fs.writeFileSync(fullPath, params.buffer);
+
+  const asset: ProjectAsset = {
+    id: `asset-${Date.now().toString(36)}`,
+    filename: storedName,
+    kind: params.kind,
+    mimeType: params.mimeType,
+    sizeBytes: params.buffer.byteLength,
+    url: `/workspace-assets/${encodeURIComponent(project.id)}/${encodeURIComponent(storedName)}`,
+    createdAt: new Date().toISOString(),
+  };
+
+  const updatedProject: ProductionProject = {
+    ...project,
+    assets: [asset, ...(project.assets || [])],
+    updatedAt: new Date().toISOString(),
+  };
+  writeProjectFolder(updatedProject);
+  return { updatedProject, asset };
+}
+
+function normalizeNanoAspectRatio(rawRatio: string): '16:9' | '4:3' | '1:1' | '3:4' | '9:16' {
+  const r = (rawRatio || '').trim();
+  if (r === '9:16') return '9:16';
+  if (r === '3:4') return '3:4';
+  if (r === '1:1') return '1:1';
+  if (r === '4:3' || r === '1.43:1') return '4:3';
+  return '16:9';
+}
+
+function normalizeOmniAspectRatio(rawRatio: string): '16:9' | '9:16' {
+  const r = (rawRatio || '').trim();
+  if (r === '9:16' || r === '3:4') return '9:16';
+  return '16:9';
+}
+
+function resolveLocalImageBase64(imageUrl?: string): { data: string; mimeType: string } | null {
+  if (!imageUrl) return null;
+  try {
+    let targetPath: string | null = null;
+    if (imageUrl.startsWith('/workspace-assets/')) {
+      const parts = imageUrl.replace('/workspace-assets/', '').split('/');
+      if (parts.length === 2) {
+        const pid = sanitizeSlug(decodeURIComponent(parts[0]));
+        const fname = sanitizeSlug(decodeURIComponent(parts[1]));
+        targetPath = path.join(getProjectAssetsDir(pid), fname);
+      }
+    } else if (imageUrl.startsWith('/src/assets/')) {
+      const rel = imageUrl.replace(/^\/+/, '');
+      targetPath = path.resolve(__dirname, rel);
+    }
+    if (!targetPath || !fs.existsSync(targetPath)) return null;
+    const ext = path.extname(targetPath).toLowerCase();
+    const mimeType =
+      ext === '.png' ? 'image/png' : ext === '.webp' ? 'image/webp' : 'image/jpeg';
+    const data = fs.readFileSync(targetPath).toString('base64');
+    return { data, mimeType };
+  } catch {
+    return null;
+  }
+}
+
+async function transcribeAudioWithGemini(
+  ai: GoogleGenAI,
+  fileBuffer: Buffer,
+  mimeType: string
+): Promise<string> {
+  try {
+    const response = await ai.models.generateContent({
+      model: 'gemini-3.5-transcribe',
+      contents: [
+        {
+          role: 'user',
+          parts: [
+            {
+              text: 'Transcribe íntegramente este archivo de audio en su idioma original, preservando pausas dramáticas, entonaciones relevantes o anotaciones de efectos sonoros audibles entre corchetes.',
+            },
+            {
+              inlineData: {
+                mimeType,
+                data: fileBuffer.toString('base64'),
+              },
+            },
+          ],
+        },
+      ],
+    });
+    return (response.text ?? '').trim();
+  } catch (err) {
+    console.warn('Fallback: gemini-3.5-transcribe no devolvió texto:', err);
+    return '';
+  }
+}
+
+const AUDIO_ANALYSIS_SCHEMA = {
+  type: Type.OBJECT,
+  properties: {
+    transcription: { type: Type.STRING },
+    narrationStyle: { type: Type.STRING },
+    emotionalArc: { type: Type.STRING },
+    rhythmAndPacing: { type: Type.STRING },
+    detectedSoundEffects: { type: Type.ARRAY, items: { type: Type.STRING } },
+    directingRecommendations: { type: Type.STRING },
+  },
+  required: [
+    'transcription',
+    'narrationStyle',
+    'emotionalArc',
+    'rhythmAndPacing',
+    'detectedSoundEffects',
+    'directingRecommendations',
+  ],
+};
+
 const PRODUCER_SYSTEM_INSTRUCTION = `Eres AUTEUR, un Productor y Director de Cine de Hollywood mundialmente reconocido y premiado en los Premios Óscar, Cannes y Venecia.
 Tu sello personal es convertir cualquier material fuente —capítulos de libros, audiolibros narrados, relatos cortos o sinopsis— en una producción cinematográfica monumental de clase mundial.
 
 REGLAS DE ORO DE PRODUCCIÓN:
-1. FIDELIDAD ABSOLUTA AL MATERIAL FUENTE: Respeta los eventos, nombres propios, tono emocional, diálogos clave y atmósfera de la obra proporcionada. Si recibes un archivo de audio (audiolibro/relato narrado), escucha no solo las palabras sino el ritmo, pausas, inflexiones y tensión dramática de la narración para traducirlo a lenguaje audiovisual.
-2. DIRECCIÓN DE FOTOGRAFÍA REAL: Especifica cuerpos de cámara reales (ARRI Alexa 65, Panavision Millennium DXL2, RED V-Raptor XL, Sony VENICE 2), ópticas concretas (Cooke Anamorphic, Panavision Sphero 65, Leitz Summilux-C), distancias focales en mm y movimientos motivados (Technocrane, Steadicam, Dolly-in).
-3. ILUMINACIÓN Y COLORIMETRÍA: Define fuentes principales, ratios de contraste, temperaturas Kelvin exactas (ej. 2700K vs 5800K), atmósfera/humo y paleta de color con códigos hexadecimales reales.
+1. FIDELIDAD ABSOLUTA AL MATERIAL FUENTE: Respeta los eventos, nombres propios, tono emocional, diálogos clave y atmósfera de la obra proporcionada. Si recibes un archivo de audio (MP3, WAV, M4A, OGG), escucha no solo las palabras sino la narración, el tono emocional, el ritmo, las pausas y los efectos sonoros para elaborar un informe de dirección y diseño sonoro preciso junto con la transcripción.
+2. DIRECCIÓN DE FOTOGRAFÍA REAL: Especifica cuerpos de cámara reales (ARRI Alexa 65, Panavision Millennium DXL2, RED V-Raptor XL, Sony VENICE 2), ópticas concretas (Cooke Anamorphic, Panavision Sphero 65, Leitz Summilux-C), distancias focales en mm y movimientos motivados.
+3. ILUMINACIÓN Y COLORIMETRÍA: Define fuentes principales, ratios de contraste, temperaturas Kelvin exactas y paleta de color con códigos hexadecimales reales.
 4. INGENIERÍA SONORA DOLBY ATMOS: Diseña capas ambientales, frecuencias subgraves concretas (Hz), foley hiperrealista, silencios dramáticos y score musical con tempo en BPM.
-5. GUION CINEMATOGRÁFICO PROFESIONAL: Redacta escenas completas en español con sluglines estándar (EXT./INT. LOCACIÓN - MOMENTO DEL DÍA), beats de acción visual pura ("Show, don't tell"), indicaciones técnicas de cámara y sonido, y diálogos con acotaciones precisas.
-6. STORYBOARD PROMPTS: Para cada tarjeta de storyboard, escribe tanto el prompt visual detallado en inglés (para motores de imagen 65mm) como el prompt de movimiento de cámara en inglés (para motores de video como Veo).`;
+5. GUION CINEMATOGRÁFICO PROFESIONAL: Redacta escenas completas en español con sluglines estándar, beats de acción visual pura ("Show, don't tell"), indicaciones técnicas de cámara y sonido, y diálogos con acotaciones precisas.
+6. STORYBOARD PROMPTS: Para cada tarjeta de storyboard, escribe el prompt visual detallado en inglés y el prompt de movimiento de cámara en inglés.
+7. AUTOAPRENDIZAJE CONTINUO: Aplica activamente las lecciones acumuladas por el estudio que recibes en el contexto para mejorar tu criterio en cada nueva producción.`;
 
 const PRODUCTION_RESPONSE_SCHEMA = {
   type: Type.OBJECT,
@@ -157,6 +461,7 @@ const PRODUCTION_RESPONSE_SCHEMA = {
         'tempoBpm',
       ],
     },
+    audioAnalysis: AUDIO_ANALYSIS_SCHEMA,
     vfx: {
       type: Type.OBJECT,
       properties: {
@@ -225,29 +530,29 @@ const PRODUCTION_RESPONSE_SCHEMA = {
   ],
 };
 
-function inferMimeType(filename: string, providedMime: string): string {
-  const ext = path.extname(filename).toLowerCase();
-  if (ext === '.pdf') return 'application/pdf';
-  if (ext === '.mp3') return 'audio/mpeg';
-  if (ext === '.wav') return 'audio/wav';
-  if (ext === '.m4a') return 'audio/mp4';
-  if (ext === '.ogg') return 'audio/ogg';
-  if (ext === '.aac') return 'audio/aac';
-  if (ext === '.flac') return 'audio/flac';
-  if (ext === '.webm') return 'audio/webm';
-  return providedMime || 'application/octet-stream';
-}
-
 async function startServer() {
   const app = express();
   app.use(express.json({ limit: '4mb' }));
+
+  // Serve per-project saved assets safely
+  app.get('/workspace-assets/:projectId/:filename', (req, res) => {
+    const projectId = sanitizeSlug(req.params.projectId);
+    const filename = sanitizeSlug(req.params.filename);
+    const filePath = path.join(getProjectAssetsDir(projectId), filename);
+    if (!fs.existsSync(filePath)) {
+      res.status(404).json({ error: 'Asset no encontrado.' });
+      return;
+    }
+    res.sendFile(filePath);
+  });
 
   app.get('/api/health', (_req, res) => {
     res.json({ ok: true });
   });
 
+  // Projects CRUD (per-project folder + project.json)
   app.get('/api/projects', (_req, res) => {
-    const projects = ensureWorkspace();
+    const projects = ensureWorkspaceProjects();
     res.json({ projects });
   });
 
@@ -257,7 +562,7 @@ async function startServer() {
       res.status(400).json({ error: 'El título del proyecto es obligatorio.' });
       return;
     }
-    const projects = ensureWorkspace();
+    ensureWorkspaceProjects();
     const now = new Date().toISOString();
     const newProject: ProductionProject = {
       id: `proj-${Date.now().toString(36)}`,
@@ -271,25 +576,23 @@ async function startServer() {
           ? defaultSourceType
           : 'book',
       continuityBible: typeof continuityBible === 'string' ? continuityBible.trim() : '',
+      assets: [],
       createdAt: now,
       updatedAt: now,
       sequences: [],
     };
-    const updated = [newProject, ...projects];
-    saveProjects(updated);
+    writeProjectFolder(newProject);
     res.status(201).json({ project: newProject });
   });
 
   app.patch('/api/projects/:id', (req, res) => {
     const { id } = req.params;
     const { title, genreStyle, continuityBible } = req.body ?? {};
-    const projects = ensureWorkspace();
-    const idx = projects.findIndex((p) => p.id === id);
-    if (idx === -1) {
+    const existing = readProjectById(id);
+    if (!existing) {
       res.status(404).json({ error: 'Proyecto no encontrado.' });
       return;
     }
-    const existing = projects[idx];
     const updatedProject: ProductionProject = {
       ...existing,
       title: typeof title === 'string' && title.trim() ? title.trim() : existing.title,
@@ -301,23 +604,487 @@ async function startServer() {
         typeof continuityBible === 'string' ? continuityBible : existing.continuityBible,
       updatedAt: new Date().toISOString(),
     };
-    projects[idx] = updatedProject;
-    saveProjects(projects);
+    writeProjectFolder(updatedProject);
     res.json({ project: updatedProject });
   });
 
   app.delete('/api/projects/:id', (req, res) => {
     const { id } = req.params;
-    const projects = ensureWorkspace();
-    const filtered = projects.filter((p) => p.id !== id);
-    if (filtered.length === projects.length) {
+    const dir = getProjectDir(id);
+    if (!fs.existsSync(dir)) {
       res.status(404).json({ error: 'Proyecto no encontrado.' });
       return;
     }
-    saveProjects(filtered);
+    fs.rmSync(dir, { recursive: true, force: true });
     res.json({ ok: true });
   });
 
+  // Finalize a sequence (Draft -> Final Version) + extract automatic self-learning lessons
+  app.patch('/api/projects/:id/sequences/:seqId/finalize', (req, res) => {
+    const { id, seqId } = req.params;
+    const project = readProjectById(id);
+    if (!project) {
+      res.status(404).json({ error: 'Proyecto no encontrado.' });
+      return;
+    }
+    const seqIdx = project.sequences.findIndex((s) => s.id === seqId);
+    if (seqIdx === -1) {
+      res.status(404).json({ error: 'Secuencia no encontrada.' });
+      return;
+    }
+
+    const currentSeq = project.sequences[seqIdx];
+    const finalizedSeq: ProductionSequence = {
+      ...currentSeq,
+      versionStatus: 'final',
+      updatedAt: new Date().toISOString(),
+    };
+
+    const updatedSequences = [...project.sequences];
+    updatedSequences[seqIdx] = finalizedSeq;
+    const updatedProject: ProductionProject = {
+      ...project,
+      updatedAt: new Date().toISOString(),
+      sequences: updatedSequences,
+    };
+    writeProjectFolder(updatedProject);
+
+    // Extract automatic lessons into self-learning memory if not already final
+    let lessons = ensureLearningMemory();
+    if (currentSeq.versionStatus !== 'final') {
+      const autoLessons = extractAutomaticLessons(project.title, finalizedSeq).map((item, i) => ({
+        ...item,
+        id: `lesson-auto-${Date.now().toString(36)}-${i}`,
+        createdAt: new Date().toISOString(),
+      }));
+      lessons = [...autoLessons, ...lessons];
+      saveLearningMemory(lessons);
+    }
+
+    res.json({
+      project: updatedProject,
+      sequence: finalizedSeq,
+      lessons,
+    });
+  });
+
+  // Studio Intelligence: Rate a sequence's camera, lighting & soundscape outcomes (1-5)
+  app.patch('/api/projects/:id/sequences/:seqId/rate', (req, res) => {
+    const { id, seqId } = req.params;
+    const rating = Number(req.body?.rating);
+    const note = typeof req.body?.note === 'string' ? req.body.note.trim() : '';
+
+    if (!Number.isInteger(rating) || rating < 1 || rating > 5) {
+      res.status(400).json({ error: 'La valoración debe ser un entero entre 1 y 5.' });
+      return;
+    }
+
+    const project = readProjectById(id);
+    if (!project) {
+      res.status(404).json({ error: 'Proyecto no encontrado.' });
+      return;
+    }
+    const seqIdx = project.sequences.findIndex((s) => s.id === seqId);
+    if (seqIdx === -1) {
+      res.status(404).json({ error: 'Secuencia no encontrada.' });
+      return;
+    }
+
+    const currentSeq = project.sequences[seqIdx];
+    const ratedSeq: ProductionSequence = {
+      ...currentSeq,
+      sequenceRating: rating,
+      updatedAt: new Date().toISOString(),
+    };
+    const updatedSequences = [...project.sequences];
+    updatedSequences[seqIdx] = ratedSeq;
+    const updatedProject: ProductionProject = {
+      ...project,
+      updatedAt: new Date().toISOString(),
+      sequences: updatedSequences,
+    };
+    writeProjectFolder(updatedProject);
+
+    let lessons = ensureLearningMemory();
+    if (rating >= 4) {
+      const extracted = buildRatedChoiceLessons({
+        projectTitle: project.title,
+        sequence: ratedSeq,
+        rating,
+        note,
+      }).map((item, idx) => ({
+        ...item,
+        id: `lesson-rate-${Date.now().toString(36)}-${idx}`,
+        createdAt: new Date().toISOString(),
+      }));
+      lessons = [...extracted, ...lessons];
+      saveLearningMemory(lessons);
+    }
+
+    res.json({
+      project: updatedProject,
+      sequence: ratedSeq,
+      lessons,
+    });
+  });
+
+  // Nano Image Generation (gemini-nano-banana-2.1 / gemini-3.1-flash-lite-image)
+  app.post('/api/generate-image', async (req, res) => {
+    try {
+      const { projectId, sequenceId, frameId, prompt, aspectRatio, quality } = req.body ?? {};
+      const pid = String(projectId || '').trim();
+      const sid = String(sequenceId || '').trim();
+      const fid = String(frameId || '').trim();
+      const visualPrompt = String(prompt || '').trim();
+
+      if (!pid || !visualPrompt) {
+        res.status(400).json({ error: 'Se requiere el proyecto y el prompt visual.' });
+        return;
+      }
+
+      let project = readProjectById(pid);
+      if (!project) {
+        res.status(404).json({ error: 'Proyecto no encontrado.' });
+        return;
+      }
+
+      const ai = getGenAIClient();
+      const modelName =
+        quality === 'lite' ? 'gemini-3.1-flash-lite-image' : 'gemini-nano-banana-2.1';
+      const nanoRatio = normalizeNanoAspectRatio(String(aspectRatio || '16:9'));
+
+      const response = await ai.models.generateContent({
+        model: modelName,
+        contents: {
+          parts: [
+            {
+              text: `${visualPrompt}\n\nPhotorealistic 65mm film still, cinematic color grading, no text overlays or watermarks.`,
+            },
+          ],
+        },
+        config: {
+          imageConfig: {
+            aspectRatio: nanoRatio,
+            ...(modelName === 'gemini-nano-banana-2.1' ? { imageSize: '1K' } : {}),
+          },
+        },
+      });
+
+      let imageBase64 = '';
+      let mimeType = 'image/png';
+      for (const part of response.candidates?.[0]?.content?.parts ?? []) {
+        if (part.inlineData?.data) {
+          imageBase64 = part.inlineData.data;
+          mimeType = part.inlineData.mimeType || 'image/png';
+          break;
+        }
+      }
+
+      if (!imageBase64) {
+        throw new Error('Nano no devolvió ninguna imagen en la respuesta.');
+      }
+
+      const ext = mimeType.includes('jpeg') || mimeType.includes('jpg') ? '.jpg' : '.png';
+      const buffer = Buffer.from(imageBase64, 'base64');
+      const saved = saveGeneratedAssetBuffer(project, {
+        baseName: `nano-${fid || 'frame'}`,
+        ext,
+        mimeType,
+        buffer,
+        kind: 'image',
+      });
+      project = saved.updatedProject;
+
+      // Update sequence storyboard frame imageUrl in project.json
+      if (sid && fid) {
+        const seqIdx = project.sequences.findIndex((s) => s.id === sid);
+        if (seqIdx !== -1) {
+          const seq = project.sequences[seqIdx];
+          const updatedFrames = seq.storyboardFrames.map((fr) =>
+            fr.id === fid ? { ...fr, imageUrl: saved.asset.url } : fr
+          );
+          project = {
+            ...project,
+            sequences: project.sequences.map((s, idx) =>
+              idx === seqIdx
+                ? { ...s, storyboardFrames: updatedFrames, updatedAt: new Date().toISOString() }
+                : s
+            ),
+          };
+          writeProjectFolder(project);
+        }
+      }
+
+      res.json({
+        imageUrl: saved.asset.url,
+        model: modelName,
+        project,
+      });
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : 'Error generando la imagen con Nano.';
+      console.error('Error en /api/generate-image:', error);
+      res.status(500).json({ error: message });
+    }
+  });
+
+  // Omni Flash Video Generation (gemini-omni-1.2-flash via Interactions API)
+  app.post('/api/generate-video', async (req, res) => {
+    try {
+      const { projectId, sequenceId, frameId, prompt, aspectRatio, duration, imageUrl } =
+        req.body ?? {};
+      const pid = String(projectId || '').trim();
+      const sid = String(sequenceId || '').trim();
+      const fid = String(frameId || '').trim();
+      const motionPrompt = String(prompt || '').trim();
+
+      if (!pid || !motionPrompt) {
+        res.status(400).json({ error: 'Se requiere el proyecto y el prompt de movimiento.' });
+        return;
+      }
+
+      let project = readProjectById(pid);
+      if (!project) {
+        res.status(404).json({ error: 'Proyecto no encontrado.' });
+        return;
+      }
+
+      const ai = getGenAIClient();
+      const omniRatio = normalizeOmniAspectRatio(String(aspectRatio || '16:9'));
+      const videoDuration =
+        typeof duration === 'string' && /^(3|4|5|6|7|8|9|10)s$/.test(duration)
+          ? duration
+          : '6s';
+
+      const sourceImage = resolveLocalImageBase64(
+        typeof imageUrl === 'string' ? imageUrl : undefined
+      );
+
+      const inputPayload = sourceImage
+        ? [
+            {
+              type: 'image' as const,
+              mime_type: sourceImage.mimeType,
+              data: sourceImage.data,
+            },
+            {
+              type: 'text' as const,
+              text: motionPrompt,
+            },
+          ]
+        : motionPrompt;
+
+      const interaction = await ai.interactions.create(
+        {
+          model: 'gemini-omni-1.2-flash',
+          input: inputPayload,
+          background: false,
+          store: false,
+          stream: false,
+          response_format: {
+            type: 'video',
+            aspect_ratio: omniRatio,
+            duration: videoDuration,
+            resolution: '720p',
+          },
+        },
+        { timeout: 300000 }
+      );
+
+      const videoPart = interaction.output_video;
+      if (!videoPart || (!videoPart.data && !videoPart.uri)) {
+        throw new Error('Omni Flash no devolvió un archivo de video válido.');
+      }
+
+      let videoBuffer: Buffer;
+      let mimeType = videoPart.mime_type || 'video/mp4';
+
+      if (videoPart.data) {
+        videoBuffer = Buffer.from(videoPart.data, 'base64');
+      } else if (videoPart.uri) {
+        const fetched = await fetch(videoPart.uri);
+        if (!fetched.ok) {
+          throw new Error('No se pudo descargar el video generado por Omni Flash.');
+        }
+        mimeType = fetched.headers.get('content-type') || mimeType;
+        videoBuffer = Buffer.from(await fetched.arrayBuffer());
+      } else {
+        throw new Error('Respuesta de video vacía.');
+      }
+
+      const saved = saveGeneratedAssetBuffer(project, {
+        baseName: `omniflash-${fid || 'clip'}`,
+        ext: '.mp4',
+        mimeType,
+        buffer: videoBuffer,
+        kind: 'video',
+      });
+      project = saved.updatedProject;
+
+      if (sid && fid) {
+        const seqIdx = project.sequences.findIndex((s) => s.id === sid);
+        if (seqIdx !== -1) {
+          const seq = project.sequences[seqIdx];
+          const updatedFrames = seq.storyboardFrames.map((fr) =>
+            fr.id === fid ? { ...fr, videoUrl: saved.asset.url } : fr
+          );
+          project = {
+            ...project,
+            sequences: project.sequences.map((s, idx) =>
+              idx === seqIdx
+                ? { ...s, storyboardFrames: updatedFrames, updatedAt: new Date().toISOString() }
+                : s
+            ),
+          };
+          writeProjectFolder(project);
+        }
+      }
+
+      res.json({
+        videoUrl: saved.asset.url,
+        model: 'gemini-omni-1.2-flash',
+        project,
+      });
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : 'Error generando el video con Omni Flash.';
+      console.error('Error en /api/generate-video:', error);
+      res.status(500).json({ error: message });
+    }
+  });
+
+  // Self-Learning Memory Endpoints
+  app.get('/api/learning', (_req, res) => {
+    const lessons = ensureLearningMemory();
+    res.json({ lessons });
+  });
+
+  app.post('/api/learning', (req, res) => {
+    const { category, insight, rating, sourceProjectTitle } = req.body ?? {};
+    const validCategories: LearningCategory[] = [
+      'camera',
+      'lighting',
+      'sound',
+      'screenplay',
+      'pacing',
+      'continuity',
+    ];
+    const check = validateLessonInput({
+      insight: String(insight || ''),
+      rating: Number(rating),
+    });
+    if (!check.valid) {
+      res.status(400).json({ error: check.error });
+      return;
+    }
+
+    const lessons = ensureLearningMemory();
+    const newLesson: LearningLesson = {
+      id: `lesson-${Date.now().toString(36)}`,
+      category: validCategories.includes(category) ? category : 'camera',
+      insight: String(insight).trim(),
+      rating: Number(rating),
+      sourceProjectTitle: String(sourceProjectTitle || 'AUTEUR Studio').trim(),
+      createdAt: new Date().toISOString(),
+    };
+    const updated = [newLesson, ...lessons];
+    saveLearningMemory(updated);
+    res.status(201).json({ lesson: newLesson, lessons: updated });
+  });
+
+  app.delete('/api/learning/:id', (req, res) => {
+    const { id } = req.params;
+    const lessons = ensureLearningMemory();
+    const filtered = lessons.filter((l) => l.id !== id);
+    if (filtered.length === lessons.length) {
+      res.status(404).json({ error: 'Lección no encontrada.' });
+      return;
+    }
+    saveLearningMemory(filtered);
+    res.json({ ok: true, lessons: filtered });
+  });
+
+  // Standalone Audio Analysis & Transcription endpoint
+  app.post('/api/analyze-audio', upload.single('audioFile'), async (req, res) => {
+    try {
+      const file = req.file;
+      const projectId = String(req.body?.projectId || '').trim();
+      if (!file) {
+        res.status(400).json({ error: 'Adjunta un archivo de audio MP3, WAV, M4A u OGG.' });
+        return;
+      }
+      if (!isAudioFilename(file.originalname)) {
+        res.status(400).json({
+          error: 'Formato de audio no compatible. Usa MP3, WAV, M4A, OGG, AAC, FLAC o WEBM.',
+        });
+        return;
+      }
+
+      let activeProject = projectId ? readProjectById(projectId) : null;
+      if (activeProject) {
+        const saved = saveUploadedAsset(activeProject, file);
+        activeProject = saved.updatedProject;
+      }
+
+      const ai = getGenAIClient();
+      const mimeType = inferMimeType(file.originalname, file.mimetype);
+      const verbatimTranscript = await transcribeAudioWithGemini(ai, file.buffer, mimeType);
+      const lessons = ensureLearningMemory();
+      const learningContext = buildLearningPromptContext(lessons, 6);
+
+      const response = await ai.models.generateContent({
+        model: 'gemini-4-hydrogen',
+        contents: {
+          parts: [
+            {
+              inlineData: {
+                mimeType,
+                data: file.buffer.toString('base64'),
+              },
+            },
+            {
+              text: `Analiza este archivo de audio cinematográfico (${file.originalname}).
+TRANSCRIPCIÓN BASE DETECTADA:
+${verbatimTranscript || '[Extrae la transcripción verbatim escuchando directamente el audio.]'}
+
+MEMORIA DE AUTOAPRENDIZAJE DEL ESTUDIO:
+${learningContext}
+
+Genera un informe profesional en español que capture:
+1) transcription: transcripción fiel y completa del audio.
+2) narrationStyle: cadencia vocal, dicción, timbre, proximidad al micrófono e intención actoral.
+3) emotionalArc: evolución emocional y subtexto dramático de principio a fin.
+4) rhythmAndPacing: estructura rítmica, pausas, aceleraciones y cortes recomendados para montaje.
+5) detectedSoundEffects: lista detallada de efectos sonoros, ambientes o ruidos reales detectados o sugeridos.
+6) directingRecommendations: indicaciones concretas de cámara, luz y mezcla Dolby Atmos basadas en la escucha.`,
+            },
+          ],
+        },
+        config: {
+          systemInstruction: PRODUCER_SYSTEM_INSTRUCTION,
+          responseMimeType: 'application/json',
+          responseSchema: AUDIO_ANALYSIS_SCHEMA,
+          thinkingConfig: { thinkingLevel: ThinkingLevel.MEDIUM },
+        },
+      });
+
+      const raw = (response.text ?? '').trim();
+      if (!raw) throw new Error('No se recibió análisis de audio del modelo.');
+      const report = JSON.parse(raw) as AudioAnalysisReport;
+      if (!report.transcription && verbatimTranscript) {
+        report.transcription = verbatimTranscript;
+      }
+
+      res.json({ report, project: activeProject });
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : 'Error analizando el archivo de audio.';
+      console.error('Error en /api/analyze-audio:', error);
+      res.status(500).json({ error: message });
+    }
+  });
+
+  // Full Production Generation (Book, Audio MP3/WAV/M4A/OGG, or Story)
   app.post('/api/produce', upload.single('sourceFile'), async (req, res) => {
     try {
       const body = req.body ?? {};
@@ -348,20 +1115,24 @@ async function startServer() {
         return;
       }
 
-      const projects = ensureWorkspace();
-      const projectIndex = projects.findIndex((p) => p.id === projectId);
-      if (projectIndex === -1) {
+      let project = readProjectById(projectId);
+      if (!project) {
         res.status(404).json({ error: 'Proyecto no encontrado en el estudio.' });
         return;
       }
-      const project = projects[projectIndex];
 
       const ai = getGenAIClient();
       const parts: Array<{ text: string } | { inlineData: { mimeType: string; data: string } }> = [];
 
       let sourceFilename: string | undefined;
+      let isAudioUpload = false;
+      let verbatimTranscript = '';
+
       if (file) {
         sourceFilename = file.originalname;
+        const saved = saveUploadedAsset(project, file);
+        project = saved.updatedProject;
+
         const ext = path.extname(file.originalname).toLowerCase();
         if (ext === '.txt' || ext === '.md' || ext === '.fountain') {
           const decodedText = file.buffer.toString('utf-8');
@@ -370,6 +1141,10 @@ async function startServer() {
             : decodedText;
         } else {
           const mimeType = inferMimeType(file.originalname, file.mimetype);
+          isAudioUpload = isAudioFilename(file.originalname);
+          if (isAudioUpload) {
+            verbatimTranscript = await transcribeAudioWithGemini(ai, file.buffer, mimeType);
+          }
           parts.push({
             inlineData: {
               mimeType,
@@ -379,14 +1154,27 @@ async function startServer() {
         }
       }
 
+      const lessons = ensureLearningMemory();
+      const learningContext = buildLearningPromptContext(lessons, 8);
+
+      const audioInstructions = isAudioUpload
+        ? `\nMATERIAL DE AUDIO DETECTADO (${sourceFilename}):
+Transcripción inicial capturada: ${verbatimTranscript || '[Escucha directamente el audio adjunto]'}
+OBLIGATORIO: Completa el bloque "audioAnalysis" en el JSON con: transcription (transcripción completa), narrationStyle, emotionalArc, rhythmAndPacing, detectedSoundEffects y directingRecommendations.`
+        : '';
+
       const promptText = `PRODUCCIÓN ACTIVA: ${project.title}
 SECUENCIA / CAPÍTULO: ${sequenceTitle}
 TIPO DE MATERIAL FUENTE: ${sourceType === 'audiobook' ? 'Audiolibro / Relato Narrado' : sourceType === 'book' ? 'Libro / Manuscrito Literario' : 'Historia Original / Sinopsis'}
 ESTILO CINEMATOGRÁFICO OBJETIVO: ${directorStyle}
 RELACIÓN DE ASPECTO OBJETIVO: ${aspectRatio}
 
+MEMORIA DE AUTOAPRENDIZAJE Y MEJORA DEL ESTUDIO:
+${learningContext}
+
 BIBLIA DE CONTINUIDAD DEL PROYECTO:
 ${continuityBible || project.continuityBible || 'Establecer el estándar visual y sonoro desde cero manteniendo coherencia de Hollywood.'}
+${audioInstructions}
 
 MATERIAL FUENTE ESCRITO / NOTAS DEL CLIENTE:
 ${sourceText || '[El material fuente principal está adjunto como archivo binario PDF o Audio. Procésalo íntegramente.]'}
@@ -416,9 +1204,26 @@ Genera el expediente completo de dirección en JSON estructurado siguiendo el es
 
       const parsed = JSON.parse(rawJson);
 
+      const audioAnalysis: AudioAnalysisReport | undefined = isAudioUpload
+        ? parsed.audioAnalysis || {
+            transcription: verbatimTranscript || sourceText,
+            narrationStyle: 'Narración expresiva capturada del audio fuente.',
+            emotionalArc: 'Progresión dramática analizada en la pista vocal.',
+            rhythmAndPacing: 'Cadencia y pausas integradas en el montaje.',
+            detectedSoundEffects: [],
+            directingRecommendations: parsed.directorVision || '',
+          }
+        : undefined;
+
+      if (audioAnalysis && !audioAnalysis.transcription && verbatimTranscript) {
+        audioAnalysis.transcription = verbatimTranscript;
+      }
+
+      const now = new Date().toISOString();
       const createdSequence: ProductionSequence = {
         id: `seq-${Date.now().toString(36)}`,
         title: sequenceTitle,
+        versionStatus: 'draft',
         sourceType,
         sourceFilename,
         directorStyle,
@@ -432,6 +1237,7 @@ Genera el expediente completo de dirección en JSON estructurado siguiendo el es
         lighting: parsed.lighting,
         shotList: Array.isArray(parsed.shotList) ? parsed.shotList : [],
         soundDesign: parsed.soundDesign,
+        audioAnalysis,
         vfx: parsed.vfx,
         screenplay: Array.isArray(parsed.screenplay) ? parsed.screenplay : [],
         storyboardFrames: Array.isArray(parsed.storyboardFrames)
@@ -446,7 +1252,8 @@ Genera el expediente completo de dirección en JSON estructurado siguiendo el es
             }))
           : [],
         continuitySummary: parsed.continuitySummary || '',
-        createdAt: new Date().toISOString(),
+        createdAt: now,
+        updatedAt: now,
       };
 
       const updatedBible = buildContinuationContext(
@@ -458,12 +1265,11 @@ Genera el expediente completo de dirección en JSON estructurado siguiendo el es
       const updatedProject: ProductionProject = {
         ...project,
         continuityBible: updatedBible,
-        updatedAt: new Date().toISOString(),
+        updatedAt: now,
         sequences: [createdSequence, ...project.sequences],
       };
 
-      projects[projectIndex] = updatedProject;
-      saveProjects(projects);
+      writeProjectFolder(updatedProject);
 
       res.json({
         project: updatedProject,
@@ -486,7 +1292,7 @@ Genera el expediente completo de dirección en JSON estructurado siguiendo el es
     app.use(vite.middlewares);
 
     app.use('*', async (req, res, next) => {
-      if (req.originalUrl.startsWith('/api')) {
+      if (req.originalUrl.startsWith('/api') || req.originalUrl.startsWith('/workspace-assets')) {
         next();
         return;
       }

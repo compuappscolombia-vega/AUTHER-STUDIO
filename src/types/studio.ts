@@ -4,6 +4,44 @@ export type WorkspaceTab = 'vision' | 'shots' | 'screenplay' | 'storyboard';
 
 export type ThinkingDepth = 'standard' | 'deep';
 
+export type SequenceVersionStatus = 'draft' | 'final';
+
+export type LearningCategory =
+  | 'camera'
+  | 'lighting'
+  | 'sound'
+  | 'screenplay'
+  | 'pacing'
+  | 'continuity';
+
+export interface LearningLesson {
+  id: string;
+  category: LearningCategory;
+  insight: string;
+  rating: number;
+  sourceProjectTitle: string;
+  createdAt: string;
+}
+
+export interface ProjectAsset {
+  id: string;
+  filename: string;
+  kind: 'audio' | 'document' | 'image' | 'video';
+  mimeType: string;
+  sizeBytes: number;
+  url: string;
+  createdAt: string;
+}
+
+export interface AudioAnalysisReport {
+  transcription: string;
+  narrationStyle: string;
+  emotionalArc: string;
+  rhythmAndPacing: string;
+  detectedSoundEffects: string[];
+  directingRecommendations: string;
+}
+
 export interface ColorSwatch {
   name: string;
   hex: string;
@@ -65,6 +103,7 @@ export interface StoryboardCard {
   aspectRatio: string;
   cameraSpec: string;
   imageUrl?: string;
+  videoUrl?: string;
   visualPrompt: string;
   veoMotionPrompt: string;
 }
@@ -72,6 +111,7 @@ export interface StoryboardCard {
 export interface ProductionSequence {
   id: string;
   title: string;
+  versionStatus: SequenceVersionStatus;
   sourceType: SourceMaterialType;
   sourceFilename?: string;
   directorStyle: string;
@@ -85,11 +125,14 @@ export interface ProductionSequence {
   lighting: LightingSetup;
   shotList: ShotSpec[];
   soundDesign: SoundDesignSpec;
+  audioAnalysis?: AudioAnalysisReport;
   vfx: VfxBreakdown;
   screenplay: ScreenplayScene[];
   storyboardFrames: StoryboardCard[];
   continuitySummary: string;
+  sequenceRating?: number;
   createdAt: string;
+  updatedAt?: string;
 }
 
 export interface ProductionProject {
@@ -98,6 +141,7 @@ export interface ProductionProject {
   genreStyle: string;
   defaultSourceType: SourceMaterialType;
   continuityBible: string;
+  assets?: ProjectAsset[];
   createdAt: string;
   updatedAt: string;
   sequences: ProductionSequence[];
@@ -111,4 +155,32 @@ export interface DirectorStylePreset {
   defaultLenses: string;
   defaultRatio: string;
   description: string;
+}
+
+export interface PatternMetric {
+  label: string;
+  detail: string;
+  occurrences: number;
+  avgRating: number;
+  sourceProjects: string[];
+}
+
+export interface DirectorialEnhancement {
+  id: string;
+  category: 'camera' | 'lighting' | 'sound';
+  title: string;
+  recommendation: string;
+  rationale: string;
+  sourceProjectTitle: string;
+  confidenceScore: number;
+  continuitySnippet: string;
+}
+
+export interface StudioIntelligenceReport {
+  totalTrackedOutcomes: number;
+  finalizedSequencesCount: number;
+  topCameraPatterns: PatternMetric[];
+  topLightingSetups: PatternMetric[];
+  topSoundscapes: PatternMetric[];
+  enhancements: DirectorialEnhancement[];
 }

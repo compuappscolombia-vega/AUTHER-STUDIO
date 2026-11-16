@@ -14,6 +14,7 @@ import type { ProductionProject, ProductionSequence } from '../types/studio';
 const sampleSequence: ProductionSequence = {
   id: 'seq-1',
   title: 'Capítulo VI: El Juramento del Hermón',
+  versionStatus: 'final',
   sourceType: 'book',
   directorStyle: 'Épica Monumental IMAX',
   aspectRatio: '1.43:1',

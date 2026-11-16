@@ -8,12 +8,33 @@ export const SEED_PROJECTS: ProductionProject[] = [
     defaultSourceType: 'book',
     continuityBible:
       'Los Vigilantes no poseen alas de pluma; son entidades colosales de geometría luminosa y túnicas de mercurio oscuro. El Monte Hermón es basalto negro volcánico y nieve perpetua sobre un mar de nubes. Contraste térmico estricto: valles humanos en terracota/dorado (2900K) frente a cielo y cumbre en plata/cobalto (6200K).',
+    assets: [
+      {
+        id: 'asset-enoc-pdf',
+        filename: 'El_Libro_de_Enoc_Cap_06.pdf',
+        kind: 'document',
+        mimeType: 'application/pdf',
+        sizeBytes: 248320,
+        url: '',
+        createdAt: '2026-11-15T18:00:00.000Z',
+      },
+      {
+        id: 'asset-enoc-img1',
+        filename: 'enoch_hermon_watchers.jpg',
+        kind: 'image',
+        mimeType: 'image/jpeg',
+        sizeBytes: 412000,
+        url: '/src/assets/images/enoch_hermon_watchers_1794858478229.jpg',
+        createdAt: '2026-11-16T09:30:00.000Z',
+      },
+    ],
     createdAt: '2026-11-15T18:00:00.000Z',
     updatedAt: '2026-11-16T09:30:00.000Z',
     sequences: [
       {
         id: 'seq-enoc-cap6',
         title: 'Capítulo VI: El Juramento del Monte Hermón',
+        versionStatus: 'final',
         sourceType: 'book',
         sourceFilename: 'El_Libro_de_Enoc_Cap_06.pdf',
         directorStyle: 'Épica Monumental IMAX',
@@ -33,7 +54,8 @@ export const SEED_PROJECTS: ProductionProject[] = [
           { name: 'Ceniza Incandescente', hex: '#E5A93C', role: 'Marcas del juramento' },
         ],
         lighting: {
-          keyLight: 'Luz lunar cenital filtrada por nubes estratosféricas (HMIs de gran formato sobre grúa)',
+          keyLight:
+            'Luz lunar cenital filtrada por nubes estratosféricas (HMIs de gran formato sobre grúa)',
           fillRatio: '8:1 Chiaroscuro escultórico, negros profundos sin aplastar textura de piedra',
           rimAndBacklight: 'Contraluz plateado a 180° perfilando siluetas en el mar de nubes',
           colorTemperatureKelvin: '6200K en cumbre · 2900K en hogueras del valle',
@@ -99,7 +121,8 @@ export const SEED_PROJECTS: ProductionProject[] = [
             'Chasquido seco de piedra fracturada bajo la palma de Semjâzâ',
           ],
           silenceBeats: '2.5 segundos de vacío acústico total justo antes de pronunciar el juramento.',
-          musicalScore: 'Coro masculino disonante en intervalos de segunda menor, cuerno antiguo de bronce y percusión de piedra.',
+          musicalScore:
+            'Coro masculino disonante en intervalos de segunda menor, cuerno antiguo de bronce y percusión de piedra.',
           tempoBpm: 54,
         },
         vfx: {
@@ -113,7 +136,8 @@ export const SEED_PROJECTS: ProductionProject[] = [
             'Plataforma hidráulica calefactada para derretir nieve bajo las pisadas finales',
           ],
           locationsAndSets: 'Tierras altas volcánicas de Islandia + extensión de set en LED Volume.',
-          wardrobeAndMakeup: 'Túnicas de tela metálica tratada con grafito y mercurio líquido; piel pálida translúcida con venas minerales.',
+          wardrobeAndMakeup:
+            'Túnicas de tela metálica tratada con grafito y mercurio líquido; piel pálida translúcida con venas minerales.',
         },
         screenplay: [
           {
@@ -219,12 +243,33 @@ export const SEED_PROJECTS: ProductionProject[] = [
     defaultSourceType: 'audiobook',
     continuityBible:
       'Ambientación costera de hormigón húmedo en los años 70. Todo el audio del magnetófono debe sonar en rango medio analógico con ligera saturación de cinta. Lámpara de escritorio de tungsteno cálido (2600K) contra ventanal circular batido por lluvia azul acero (5600K).',
+    assets: [
+      {
+        id: 'asset-faro-mp3',
+        filename: 'Audiolibro_Ultima_Frecuencia_Cap01.mp3',
+        kind: 'audio',
+        mimeType: 'audio/mpeg',
+        sizeBytes: 3840120,
+        url: '',
+        createdAt: '2026-11-16T08:10:00.000Z',
+      },
+      {
+        id: 'asset-faro-img1',
+        filename: 'lighthouse_thriller_frame.jpg',
+        kind: 'image',
+        mimeType: 'image/jpeg',
+        sizeBytes: 356000,
+        url: '/src/assets/images/lighthouse_thriller_frame_1794858479130.jpg',
+        createdAt: '2026-11-16T08:15:00.000Z',
+      },
+    ],
     createdAt: '2026-11-15T12:00:00.000Z',
     updatedAt: '2026-11-16T08:15:00.000Z',
     sequences: [
       {
         id: 'seq-faro-01',
         title: 'Capítulo I: La Cinta 14-B en la Tormenta',
+        versionStatus: 'draft',
         sourceType: 'audiobook',
         sourceFilename: 'Audiolibro_Ultima_Frecuencia_Cap01.mp3',
         directorStyle: 'Thriller Psicológico Neo-Noir',
@@ -282,6 +327,23 @@ export const SEED_PROJECTS: ProductionProject[] = [
           silenceBeats: 'Corte abrupto de la tormenta interior al poner los auriculares.',
           musicalScore: 'Chelo solista con arco sobre el puente y drones analógicos mínimos.',
           tempoBpm: 68,
+        },
+        audioAnalysis: {
+          transcription:
+            '[00:00] (Lluvia densa sobre vidrio, chasquido mecánico de cinta) NARRADOR: "Cuando la aguja del magnetófono tocó el cabezal, el océano afuera pareció contener la respiración." [00:14] (Pausa de 3.8s, zumbido de 60 Hz) VOZ EN CINTA: "No mires hacia la ventana circular. Todavía no ha dejado de llover."',
+          narrationStyle:
+            'Voz barítono cercana al micrófono con respiración audible y cadencia pausada de thriller clásico.',
+          emotionalArc:
+            'Aislamiento melancólico inicial que escala súbitamente hacia paranoia contenida en el segundo 14.',
+          rhythmAndPacing:
+            '68 BPM orgánicos dictados por la rotación de las bobinas y pausas deliberadas de 3–4 segundos antes de las revelaciones.',
+          detectedSoundEffects: [
+            'Golpe hidráulico de lluvia contra cristal grueso',
+            'Clic metálico de transporte analógico (PLAY / PAUSE)',
+            'Zumbido eléctrico de transformador de tubo',
+          ],
+          directingRecommendations:
+            'Sostener planos estáticos de 15–20s durante las pausas vocales para replicar la tensión auditiva; aplicar filtro paso-banda (350Hz–3.2kHz) exclusivamente a la voz reproducida por la cinta.',
         },
         vfx: {
           cgiElements: ['Extensión de mar embravecido tras el ventanal en plano abierto'],
@@ -343,12 +405,24 @@ export const SEED_PROJECTS: ProductionProject[] = [
     defaultSourceType: 'story',
     continuityBible:
       'Arquitectura orbital brutalista en titanio mate y obsidiana sin hologramas azules cliché. Toda iluminación espacial proviene exclusivamente de la corona solar eclipsada y balizas ámbar de emergencia.',
+    assets: [
+      {
+        id: 'asset-kepler-img1',
+        filename: 'kepler_scifi_frame.jpg',
+        kind: 'image',
+        mimeType: 'image/jpeg',
+        sizeBytes: 398000,
+        url: '/src/assets/images/kepler_scifi_frame_1794858479242.jpg',
+        createdAt: '2026-11-15T19:00:00.000Z',
+      },
+    ],
     createdAt: '2026-11-14T15:00:00.000Z',
     updatedAt: '2026-11-15T19:00:00.000Z',
     sequences: [
       {
         id: 'seq-kepler-04',
         title: 'Secuencia 04: Eclipse sobre el Metano',
+        versionStatus: 'final',
         sourceType: 'story',
         directorStyle: 'Ciencia Ficción Visionaria',
         aspectRatio: '1.43:1',
@@ -383,15 +457,23 @@ export const SEED_PROJECTS: ProductionProject[] = [
           },
         ],
         soundDesign: {
-          atmosLayers: ['Silencio absoluto en el vacío exterior; resonancia metálica transmitida por las botas magnéticas'],
+          atmosLayers: [
+            'Silencio absoluto en el vacío exterior; resonancia metálica transmitida por las botas magnéticas',
+          ],
           subBassCue: 'Vibración estructural de 28 Hz propagada por el traje espacial.',
-          foleyDetails: ['Respiración regulada dentro del casco', 'Anclaje magnético sobre rejilla metálica'],
+          foleyDetails: [
+            'Respiración regulada dentro del casco',
+            'Anclaje magnético sobre rejilla metálica',
+          ],
           silenceBeats: 'Silencio total cuando suelta la barandilla.',
           musicalScore: 'Sintetizador modular grave y armónicos de órgano de tubos.',
           tempoBpm: 48,
         },
         vfx: {
-          cgiElements: ['Simulación volumétrica de nubes planetarias de metano', 'Superestructura brutalista de 4 km'],
+          cgiElements: [
+            'Simulación volumétrica de nubes planetarias de metano',
+            'Superestructura brutalista de 4 km',
+          ],
           practicalSfx: ['Pasarela real suspendida en gimbal sobre fondo negro'],
           locationsAndSets: 'Set práctico de pasarela con iluminación de arco voltaico.',
           wardrobeAndMakeup: 'Traje EVA mate gris carbón con visor dorado antirreflejo.',

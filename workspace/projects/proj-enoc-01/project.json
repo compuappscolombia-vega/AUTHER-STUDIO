@@ -1,0 +1,247 @@
+{
+  "id": "proj-enoc-01",
+  "title": "El Libro de Enoc: Los Vigilantes",
+  "genreStyle": "Épica Monumental IMAX (Denis Villeneuve · Ridley Scott)",
+  "defaultSourceType": "book",
+  "continuityBible": "Los Vigilantes no poseen alas de pluma; son entidades colosales de geometría luminosa y túnicas de mercurio oscuro. El Monte Hermón es basalto negro volcánico y nieve perpetua sobre un mar de nubes. Contraste térmico estricto: valles humanos en terracota/dorado (2900K) frente a cielo y cumbre en plata/cobalto (6200K).",
+  "assets": [
+    {
+      "id": "asset-enoc-pdf",
+      "filename": "El_Libro_de_Enoc_Cap_06.pdf",
+      "kind": "document",
+      "mimeType": "application/pdf",
+      "sizeBytes": 248320,
+      "url": "",
+      "createdAt": "2026-11-15T18:00:00.000Z"
+    },
+    {
+      "id": "asset-enoc-img1",
+      "filename": "enoch_hermon_watchers.jpg",
+      "kind": "image",
+      "mimeType": "image/jpeg",
+      "sizeBytes": 412000,
+      "url": "/src/assets/images/enoch_hermon_watchers_1794858478229.jpg",
+      "createdAt": "2026-11-16T09:30:00.000Z"
+    }
+  ],
+  "createdAt": "2026-11-15T18:00:00.000Z",
+  "updatedAt": "2026-11-16T21:51:46.462Z",
+  "sequences": [
+    {
+      "id": "seq-enoc-cap6",
+      "title": "Capítulo VI: El Juramento del Monte Hermón",
+      "versionStatus": "final",
+      "sourceType": "book",
+      "sourceFilename": "El_Libro_de_Enoc_Cap_06.pdf",
+      "directorStyle": "Épica Monumental IMAX",
+      "aspectRatio": "1.43:1",
+      "cameraSystem": "ARRI Alexa 65 IMAX + Panavision Millennium DXL2 (2.39:1 en valle)",
+      "lensPackage": "Panavision Sphero 65 & Hasselblad Prime DNA (35mm, 50mm, 100mm)",
+      "filmStockOrLut": "LUT Hermon Silver-Obsidian / Emulsión Kodak 2383 Alto Contraste",
+      "logline": "Doscientos Vigilantes descienden del éter sobre el pico volcánico del Hermón y sellan con imprecaciones mutuas un pacto que condenará la historia humana.",
+      "directorVision": "La secuencia inicia en la calidez sensorial y orgánica de los valles de Jared en 2.39:1 Anamórfico para abrirse verticalmente a 1.43:1 IMAX cuando la cámara atraviesa la estratosfera. Tratamos la caída no como una batalla ruidosa, sino como una liturgia trágica de silencio absoluto, gravedad súbita y miedo profético en la voz de Semjâzâ.",
+      "colorPalette": [
+        {
+          "name": "Obsidiana Basáltica",
+          "hex": "#0D0F14",
+          "role": "Roca volcánica y sombras"
+        },
+        {
+          "name": "Plata Lunar",
+          "hex": "#B9C4D6",
+          "role": "Luminiscencia de los Vigilantes"
+        },
+        {
+          "name": "Cobalto Abisal",
+          "hex": "#1E314A",
+          "role": "Atmósfera estratosférica"
+        },
+        {
+          "name": "Terracota Solar",
+          "hex": "#C77B43",
+          "role": "Valles de los hijos de los hombres"
+        },
+        {
+          "name": "Ceniza Incandescente",
+          "hex": "#E5A93C",
+          "role": "Marcas del juramento"
+        }
+      ],
+      "lighting": {
+        "keyLight": "Luz lunar cenital filtrada por nubes estratosféricas (HMIs de gran formato sobre grúa)",
+        "fillRatio": "8:1 Chiaroscuro escultórico, negros profundos sin aplastar textura de piedra",
+        "rimAndBacklight": "Contraluz plateado a 180° perfilando siluetas en el mar de nubes",
+        "colorTemperatureKelvin": "6200K en cumbre · 2900K en hogueras del valle",
+        "atmosphereAndHaze": "Niebla glacial continua a ras de suelo y cristales de hielo en suspensión"
+      },
+      "shotList": [
+        {
+          "shotNumber": "01A",
+          "shotType": "EWS",
+          "lensMm": "24mm",
+          "movement": "Zoom óptico continuo + descenso aéreo",
+          "durationSec": 18,
+          "framingNote": "Valles de Jared bañados en luz dorada; ríos turquesa y aldeas humeantes.",
+          "psychologicalIntent": "Mostrar la fragilidad viva y sensual de la tierra frente a la eternidad."
+        },
+        {
+          "shotNumber": "01B",
+          "shotType": "ECU",
+          "lensMm": "100mm",
+          "movement": "Steadicam flotante 48fps",
+          "durationSec": 11,
+          "framingNote": "Hombros bañados en agua de manantial y chispas de hoguera reflejadas en ojos.",
+          "psychologicalIntent": "Encarnar el magnetismo mortal que despierta el deseo en lo divino."
+        },
+        {
+          "shotNumber": "02A",
+          "shotType": "MS",
+          "lensMm": "50mm",
+          "movement": "Ascenso vertical que perfora nubes hacia IMAX 1.43:1",
+          "durationSec": 16,
+          "framingNote": "Siluetas de los Vigilantes sobre la estratosfera; pupilas dilatándose por primera vez.",
+          "psychologicalIntent": "Ruptura de la impasibilidad celestial; transición física de formato."
+        },
+        {
+          "shotNumber": "03A",
+          "shotType": "WS",
+          "lensMm": "35mm",
+          "movement": "Technocrane orbital descendente",
+          "durationSec": 22,
+          "framingNote": "Doscientas luminarias cayendo en formación geométrica sobre el Monte Hermón.",
+          "psychologicalIntent": "Impacto monumental sin fuego; la gravedad terrestre reclama sus cuerpos."
+        },
+        {
+          "shotNumber": "04A",
+          "shotType": "CU",
+          "lensMm": "65mm",
+          "movement": "Travelling circular lento rostro por rostro",
+          "durationSec": 28,
+          "framingNote": "Los veinte jefes de decenas alrededor de Semjâzâ sobre la losa marcada.",
+          "psychologicalIntent": "Gravedad litúrgica del pase de lista y peso irreversible de la maldición."
+        }
+      ],
+      "soundDesign": {
+        "atmosLayers": [
+          "Viento estratosférico en estéreo amplio (sin silbidos agudos)",
+          "Crujido de basalto congelado expandiéndose en Dolby Atmos cenital",
+          "Murmullo coral distante en tres capas armónicas"
+        ],
+        "subBassCue": "Onda sinusoidal de 22 Hz sostenida durante el impacto de los 200 en la cumbre.",
+        "foleyDetails": [
+          "Cristalización instantánea del hielo al contacto con la roca",
+          "Respiración pesada por primera vez al adquirir densidad corporal",
+          "Chasquido seco de piedra fracturada bajo la palma de Semjâzâ"
+        ],
+        "silenceBeats": "2.5 segundos de vacío acústico total justo antes de pronunciar el juramento.",
+        "musicalScore": "Coro masculino disonante en intervalos de segunda menor, cuerno antiguo de bronce y percusión de piedra.",
+        "tempoBpm": 54
+      },
+      "vfx": {
+        "cgiElements": [
+          "Anillos geométricos de luz tenue alrededor de los Vigilantes antes de encarnar",
+          "Grietas luminosas fractales recorriendo la cumbre negra durante la imprecación",
+          "Transición estratosférica sin cortes desde el valle hasta el cielo"
+        ],
+        "practicalSfx": [
+          "Nieve volcánica real proyectada por turbinas silenciosas",
+          "Plataforma hidráulica calefactada para derretir nieve bajo las pisadas finales"
+        ],
+        "locationsAndSets": "Tierras altas volcánicas de Islandia + extensión de set en LED Volume.",
+        "wardrobeAndMakeup": "Túnicas de tela metálica tratada con grafito y mercurio líquido; piel pálida translúcida con venas minerales."
+      },
+      "screenplay": [
+        {
+          "sceneNumber": "01",
+          "slugline": "EXT. VALLES DE JARED - ATARDECER",
+          "timeOfDay": "ATARDECER",
+          "beats": [
+            {
+              "type": "camera",
+              "text": "Relación 2.39:1 Anamórfico. La cámara desciende desde una altitud vertiginosa atravesando nubes doradas hasta rozar las copas de los cedros."
+            },
+            {
+              "type": "action",
+              "text": "El mundo es joven y vasto. Cientos de aldeas de piedra humean junto a ríos turquesa. Las hijas de los hombres recogen agua y ríen alrededor de fogatas encendidas."
+            },
+            {
+              "type": "sound",
+              "text": "Risas lejanas, agua viva, madera chisporroteando. Súbitamente todo el sonido terrenal se filtra hacia un eco lejano mientras la cámara asciende verticalmente."
+            }
+          ]
+        },
+        {
+          "sceneNumber": "02",
+          "slugline": "EXT. UMBRAL DEL CIELO - CONTINUO",
+          "timeOfDay": "CREPÚSCULO",
+          "beats": [
+            {
+              "type": "camera",
+              "text": "El encuadre se expande verticalmente a IMAX 1.43:1. Luz fría, plata y cobalto."
+            },
+            {
+              "type": "action",
+              "text": "Suspendidos sobre el mar de nubes permanecen LOS VIGILANTES. Siluetas altísimas, de luz contenida. Uno inclina la cabeza; por primera vez en la eternidad, una pupila oscura dilata sus ojos blancos."
+            },
+            {
+              "type": "dialogue",
+              "character": "VIGILANTES",
+              "parenthetical": "en susurro coral de tres capas",
+              "text": "Venid. Escojámonos esposas de entre los hijos de los hombres, y engendremos hijos."
+            },
+            {
+              "type": "action",
+              "text": "Avanza SEMJÂZÂ. Su túnica de mercurio vibra con una tensión trágica. Tras él se insinúa la sombra fugaz de unas cadenas invisibles."
+            },
+            {
+              "type": "dialogue",
+              "character": "SEMJÂZÂ",
+              "parenthetical": "voz cavernosa, cargada de presagio",
+              "text": "Me temo que en verdad no aceptaréis hacer este acto, y yo solo tendré que pagar la pena de un gran pecado."
+            },
+            {
+              "type": "dialogue",
+              "character": "TODOS LOS VIGILANTES",
+              "parenthetical": "al unísono, haciendo vibrar las nubes",
+              "text": "Hagamos todos un juramento, y comprometámonos todos por imprecaciones mutuas a no abandonar este plan, sino a hacer esta cosa."
+            }
+          ]
+        },
+        {
+          "sceneNumber": "03",
+          "slugline": "EXT. CUMBRE DEL MONTE HERMÓN - NOCHE",
+          "timeOfDay": "NOCHE",
+          "beats": [
+            {
+              "type": "sound",
+              "text": "Vacío acústico absoluto seguido de una onda subgrave de 22 Hz que hace temblar la roca."
+            },
+            {
+              "type": "action",
+              "text": "Doscientas luminarias impactan la cima basáltica en anillos concéntricos. El polvo de hielo se disipa revelando cuerpos colosales sometidos por primera vez a la gravedad. Semjâzâ clava la palma sobre la losa negra; grietas de ceniza blanca conectan a los doscientos."
+            },
+            {
+              "type": "action",
+              "text": "Travelling circular lento frente a los jefes de decenas: Sêmîazâz, Arâkîba, Râmêêl, Kôkabîêl, Tâmîêl, Dânêl, Êzêl, Barâqîjâl, Batjêl, Samsêl y Sariel. Al alba, descienden a pie hacia el valle mientras la nieve se funde bajo sus pasos."
+            }
+          ]
+        }
+      ],
+      "storyboardFrames": [
+        {
+          "id": "sb-enoc-1",
+          "title": "El Círculo del Hermón",
+          "shotRef": "Plano 03A · EWS",
+          "aspectRatio": "1.43:1",
+          "cameraSpec": "ARRI Alexa 65 · 35mm Sphero · Technocrane orbital",
+          "imageUrl": "/src/assets/images/enoch_hermon_watchers_1794858478229.jpg",
+          "visualPrompt": "IMAX 65mm film still, monumental wide shot of towering luminous ancient celestial figures in dark mercury robes standing in concentric circles on a snow-capped black basalt summit above clouds at twilight, glowing geometric sigils etched in stone",
+          "veoMotionPrompt": "Slow majestic orbital crane camera circling 200 towering cloaked watchers on snowy black peak while faint silver runes ignite across the stone floor, atmospheric wind blowing mist"
+        }
+      ],
+      "continuitySummary": "Los 200 Vigilantes liderados por Semjâzâ y los jefes de decenas han sellado su imprecación en el Monte Hermón y descienden hacia los valles de Jared.",
+      "createdAt": "2026-11-16T09:30:00.000Z",
+      "updatedAt": "2026-11-16T09:30:00.000Z"
+    }
+  ]
+}

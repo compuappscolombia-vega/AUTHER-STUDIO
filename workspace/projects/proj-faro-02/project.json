@@ -1,0 +1,171 @@
+{
+  "id": "proj-faro-02",
+  "title": "La Última Frecuencia (Audiolibro)",
+  "genreStyle": "Thriller Psicológico Neo-Noir (David Fincher · Christopher Nolan)",
+  "defaultSourceType": "audiobook",
+  "continuityBible": "Ambientación costera de hormigón húmedo en los años 70. Todo el audio del magnetófono debe sonar en rango medio analógico con ligera saturación de cinta. Lámpara de escritorio de tungsteno cálido (2600K) contra ventanal circular batido por lluvia azul acero (5600K).",
+  "assets": [
+    {
+      "id": "asset-faro-mp3",
+      "filename": "Audiolibro_Ultima_Frecuencia_Cap01.mp3",
+      "kind": "audio",
+      "mimeType": "audio/mpeg",
+      "sizeBytes": 3840120,
+      "url": "",
+      "createdAt": "2026-11-16T08:10:00.000Z"
+    },
+    {
+      "id": "asset-faro-img1",
+      "filename": "lighthouse_thriller_frame.jpg",
+      "kind": "image",
+      "mimeType": "image/jpeg",
+      "sizeBytes": 356000,
+      "url": "/src/assets/images/lighthouse_thriller_frame_1794858479130.jpg",
+      "createdAt": "2026-11-16T08:15:00.000Z"
+    }
+  ],
+  "createdAt": "2026-11-15T12:00:00.000Z",
+  "updatedAt": "2026-11-16T08:15:00.000Z",
+  "sequences": [
+    {
+      "id": "seq-faro-01",
+      "title": "Capítulo I: La Cinta 14-B en la Tormenta",
+      "versionStatus": "draft",
+      "sourceType": "audiobook",
+      "sourceFilename": "Audiolibro_Ultima_Frecuencia_Cap01.mp3",
+      "directorStyle": "Thriller Psicológico Neo-Noir",
+      "aspectRatio": "2.39:1",
+      "cameraSystem": "RED V-Raptor XL 8K VV",
+      "lensPackage": "Cooke Anamorphic /i SF (40mm, 65mm, 100mm)",
+      "filmStockOrLut": "LUT Fincher Sodium-Slate / Grano fino 35mm",
+      "logline": "Un técnico de faro solitario reproduce una bobina magnética rescatada del mar y descubre que la voz grabada describe sus propios movimientos en tiempo real.",
+      "directorVision": "Adaptación nacida directamente del ritmo respiratorio del audiolibro: respetamos cada pausa de cuatro segundos del narrador convirtiéndola en planos fijos milimétricos donde el único movimiento son las bobinas girando y las gotas de lluvia deformando el ventanal circular.",
+      "colorPalette": [
+        {
+          "name": "Hormigón Húmedo",
+          "hex": "#1B2024",
+          "role": "Muros del faro"
+        },
+        {
+          "name": "Ámbar Tungsteno",
+          "hex": "#D98A2B",
+          "role": "Lámpara de mesa y vúmetros"
+        },
+        {
+          "name": "Acero Tormenta",
+          "hex": "#2F4657",
+          "role": "Ventanal oceánico"
+        },
+        {
+          "name": "Negro Cinta",
+          "hex": "#090A0C",
+          "role": "Siluetas y sombras duras"
+        }
+      ],
+      "lighting": {
+        "keyLight": "Lámpara práctica de escritorio halógena con difusor de papel vegetal",
+        "fillRatio": "6:1 con rebote negativo total en el lado izquierdo del actor",
+        "rimAndBacklight": "Relámpagos intermitentes a 6500K desde el ventanal circular",
+        "colorTemperatureKelvin": "2600K interior práctico · 5600K tormenta exterior",
+        "atmosphereAndHaze": "Humedad salina densa atrapando el haz de la lámpara"
+      },
+      "shotList": [
+        {
+          "shotNumber": "01A",
+          "shotType": "MS",
+          "lensMm": "40mm",
+          "movement": "Dolly-in imperceptible (2 cm/seg)",
+          "durationSec": 20,
+          "framingNote": "Silueta de perfil frente al magnetófono con el ojo circular de lluvia detrás.",
+          "psychologicalIntent": "Encierro claustrofóbico bajo vigilancia oceánica."
+        },
+        {
+          "shotNumber": "01B",
+          "shotType": "ECU",
+          "lensMm": "100mm",
+          "movement": "Fijo macro sobre vúmetros",
+          "durationSec": 9,
+          "framingNote": "Agujas analógicas saltando al ritmo de la voz en cinta.",
+          "psychologicalIntent": "Materializar la amenaza en un objeto mecánico."
+        }
+      ],
+      "soundDesign": {
+        "atmosLayers": [
+          "Lluvia pesada azotando cristal grueso en canales surround",
+          "Zumbido eléctrico de transformador a 60 Hz"
+        ],
+        "subBassCue": "Golpe grave de oleaje contra los cimientos a 32 Hz cada 14 segundos.",
+        "foleyDetails": [
+          "Clic metálico del botón PLAY en el magnetófono",
+          "Roce áspero de chaqueta impermeable mojada"
+        ],
+        "silenceBeats": "Corte abrupto de la tormenta interior al poner los auriculares.",
+        "musicalScore": "Chelo solista con arco sobre el puente y drones analógicos mínimos.",
+        "tempoBpm": 68
+      },
+      "audioAnalysis": {
+        "transcription": "[00:00] (Lluvia densa sobre vidrio, chasquido mecánico de cinta) NARRADOR: \"Cuando la aguja del magnetófono tocó el cabezal, el océano afuera pareció contener la respiración.\" [00:14] (Pausa de 3.8s, zumbido de 60 Hz) VOZ EN CINTA: \"No mires hacia la ventana circular. Todavía no ha dejado de llover.\"",
+        "narrationStyle": "Voz barítono cercana al micrófono con respiración audible y cadencia pausada de thriller clásico.",
+        "emotionalArc": "Aislamiento melancólico inicial que escala súbitamente hacia paranoia contenida en el segundo 14.",
+        "rhythmAndPacing": "68 BPM orgánicos dictados por la rotación de las bobinas y pausas deliberadas de 3–4 segundos antes de las revelaciones.",
+        "detectedSoundEffects": [
+          "Golpe hidráulico de lluvia contra cristal grueso",
+          "Clic metálico de transporte analógico (PLAY / PAUSE)",
+          "Zumbido eléctrico de transformador de tubo"
+        ],
+        "directingRecommendations": "Sostener planos estáticos de 15–20s durante las pausas vocales para replicar la tensión auditiva; aplicar filtro paso-banda (350Hz–3.2kHz) exclusivamente a la voz reproducida por la cinta."
+      },
+      "vfx": {
+        "cgiElements": [
+          "Extensión de mar embravecido tras el ventanal en plano abierto"
+        ],
+        "practicalSfx": [
+          "Torres de lluvia reales fuera del set de hormigón"
+        ],
+        "locationsAndSets": "Interior de búnker costero en estudio con ventanal circular practicable.",
+        "wardrobeAndMakeup": "Gorro de lana negro húmedo, parka de lona encerada, ojeras pronunciadas."
+      },
+      "screenplay": [
+        {
+          "sceneNumber": "01",
+          "slugline": "INT. SALA DE RADIO DEL FARO - NOCHE",
+          "timeOfDay": "NOCHE",
+          "beats": [
+            {
+              "type": "camera",
+              "text": "2.39:1 Anamórfico. Plano medio fijo. A la izquierda, el enorme ventanal redondo muestra el Atlántico furioso. A la derecha, ELÍAS (40) permanece inmóvil ante la mesa metálica."
+            },
+            {
+              "type": "sound",
+              "text": "Clic seco del magnetófono. Siseo magnético de cinta vieja durante tres segundos."
+            },
+            {
+              "type": "dialogue",
+              "character": "VOZ EN CINTA (O.S.)",
+              "parenthetical": "filtrada, metálica, idéntica a la de Elías",
+              "text": "No mires hacia la ventana circular. Todavía no ha dejado de llover."
+            },
+            {
+              "type": "action",
+              "text": "Los dedos de Elías se congelan sobre el botón de pausa. La aguja del vúmetro cae en seco."
+            }
+          ]
+        }
+      ],
+      "storyboardFrames": [
+        {
+          "id": "sb-faro-1",
+          "title": "La Cinta 14-B",
+          "shotRef": "Plano 01A · MS",
+          "aspectRatio": "2.39:1",
+          "cameraSpec": "RED V-Raptor · Cooke Anamorphic 40mm · Dolly lento",
+          "imageUrl": "/src/assets/images/lighthouse_thriller_frame_1794858479130.jpg",
+          "visualPrompt": "35mm anamorphic cinema still of lone lighthouse keeper silhouette facing vintage reel-to-reel tape machine beside a round rain-lashed window, amber desk lamp vs cold slate storm",
+          "veoMotionPrompt": "Very slow push-in toward man standing beside spinning reel-to-reel tape recorder while heavy rain streams down the circular window and amber lamp flickers"
+        }
+      ],
+      "continuitySummary": "Elías ha reproducido la cinta 14-B y descubierto que la voz conoce su posición exacta en el faro.",
+      "createdAt": "2026-11-16T08:15:00.000Z"
+    }
+  ]
+}

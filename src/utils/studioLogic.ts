@@ -208,6 +208,22 @@ export function formatScreenplayMarkdown(
   lines.push(`- **Locaciones y Sets:** ${sequence.vfx.locationsAndSets}`);
   lines.push(`- **Vestuario y Maquillaje:** ${sequence.vfx.wardrobeAndMakeup}`);
   lines.push('');
+  if (sequence.audioAnalysis) {
+    lines.push('## 5B. Informe de Dirección y Transcripción del Audio Fuente');
+    lines.push(`- **Narración:** ${sequence.audioAnalysis.narrationStyle}`);
+    lines.push(`- **Arco Emocional:** ${sequence.audioAnalysis.emotionalArc}`);
+    lines.push(`- **Ritmo:** ${sequence.audioAnalysis.rhythmAndPacing}`);
+    lines.push(
+      `- **Efectos Detectados:** ${sequence.audioAnalysis.detectedSoundEffects.join(' | ')}`
+    );
+    lines.push(
+      `- **Recomendaciones de Dirección:** ${sequence.audioAnalysis.directingRecommendations}`
+    );
+    lines.push('');
+    lines.push('### Transcripción Verbatim');
+    lines.push(sequence.audioAnalysis.transcription);
+    lines.push('');
+  }
   lines.push('## 6. Guion Cinematográfico');
   for (const scene of sequence.screenplay) {
     lines.push('');

@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Volume2, Camera } from 'lucide-react';
+import { Volume2, Camera, AudioLines } from 'lucide-react';
 import type { ProductionSequence } from '../types/studio';
 import { parseAspectRatio } from '../utils/studioLogic';
 
@@ -42,7 +42,7 @@ export function ShotsAndSoundView({ sequence }: ShotsAndSoundViewProps) {
               Planos de Cámara y Encuadre
             </h2>
           </div>
-          <div className="text-xs font-mono-tech text-[#8D8981]">
+          <div className="text-xs font-mono-tech text-[#8D8981] tabular-nums">
             {sequence.shotList.length} planos · Relación {sequence.aspectRatio}
           </div>
         </div>
@@ -68,9 +68,7 @@ export function ShotsAndSoundView({ sequence }: ShotsAndSoundViewProps) {
                     : 'Visor de encuadre cinematográfico'
                 }
               >
-                {/* Outer matte */}
                 <rect x="0" y="0" width={svgW} height={svgH} fill="#07070A" />
-                {/* Active aspect frame */}
                 <rect
                   x={frameX}
                   y={frameY}
@@ -81,7 +79,6 @@ export function ShotsAndSoundView({ sequence }: ShotsAndSoundViewProps) {
                   strokeWidth="1.2"
                   strokeOpacity="0.85"
                 />
-                {/* Rule of thirds lines */}
                 <line
                   x1={frameX + frameW / 3}
                   y1={frameY}
@@ -118,7 +115,6 @@ export function ShotsAndSoundView({ sequence }: ShotsAndSoundViewProps) {
                   strokeOpacity="0.14"
                   strokeDasharray="3 3"
                 />
-                {/* Center reticle */}
                 <line
                   x1={svgW / 2 - 10}
                   y1={svgH / 2}
@@ -137,7 +133,6 @@ export function ShotsAndSoundView({ sequence }: ShotsAndSoundViewProps) {
                   strokeOpacity="0.6"
                   strokeWidth="1"
                 />
-                {/* Labels inside matte */}
                 <text
                   x={frameX + 8}
                   y={frameY + 16}
@@ -213,10 +208,14 @@ export function ShotsAndSoundView({ sequence }: ShotsAndSoundViewProps) {
                             {shot.shotNumber}
                           </button>
                         </td>
-                        <td className="py-2.5 px-3 font-mono-tech whitespace-nowrap">{shot.shotType}</td>
-                        <td className="py-2.5 px-3 font-mono-tech whitespace-nowrap">{shot.lensMm}</td>
+                        <td className="py-2.5 px-3 font-mono-tech whitespace-nowrap">
+                          {shot.shotType}
+                        </td>
+                        <td className="py-2.5 px-3 font-mono-tech whitespace-nowrap">
+                          {shot.lensMm}
+                        </td>
                         <td className="py-2.5 px-3 max-w-[200px] truncate">{shot.movement}</td>
-                        <td className="py-2.5 px-3 text-right font-mono-tech whitespace-nowrap">
+                        <td className="py-2.5 px-3 text-right font-mono-tech whitespace-nowrap tabular-nums">
                           {shot.durationSec}s
                         </td>
                       </tr>
@@ -238,7 +237,7 @@ export function ShotsAndSoundView({ sequence }: ShotsAndSoundViewProps) {
               Ingeniería Sonora, Foley y Banda Sonora
             </h2>
           </div>
-          <div className="text-xs font-mono-tech text-[#8D8981]">
+          <div className="text-xs font-mono-tech text-[#8D8981] tabular-nums">
             Dolby Atmos · {sequence.soundDesign.tempoBpm} BPM
           </div>
         </div>
@@ -294,6 +293,90 @@ export function ShotsAndSoundView({ sequence }: ShotsAndSoundViewProps) {
           </div>
         </div>
       </section>
+
+      {/* Audio Analysis & Verbatim Transcription Report */}
+      {sequence.audioAnalysis && (
+        <section
+          aria-labelledby="audio-analysis-heading"
+          className="pt-6 border-t border-white/10 space-y-4"
+        >
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div className="flex items-center gap-2">
+              <AudioLines className="w-4 h-4 text-[#E5A93C]" />
+              <h2
+                id="audio-analysis-heading"
+                className="font-display text-lg font-semibold text-[#F2F0EB]"
+              >
+                Informe de Dirección Sonoro y Transcripción del Audio Fuente
+              </h2>
+            </div>
+            {sequence.sourceFilename && (
+              <div className="text-xs font-mono-tech text-[#8D8981]">
+                {sequence.sourceFilename}
+              </div>
+            )}
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div className="p-4 rounded-xl border border-white/10 bg-[#131318] space-y-3">
+              <div>
+                <div className="text-xs font-medium text-[#C8C3BA] mb-1">
+                  Estilo de Narración e Interpretación Vocal
+                </div>
+                <p className="text-sm text-[#EAE6DE] leading-relaxed">
+                  {sequence.audioAnalysis.narrationStyle}
+                </p>
+              </div>
+              <div className="pt-3 border-t border-white/5">
+                <div className="text-xs font-medium text-[#C8C3BA] mb-1">
+                  Arco y Tono Emocional
+                </div>
+                <p className="text-sm text-[#EAE6DE] leading-relaxed">
+                  {sequence.audioAnalysis.emotionalArc}
+                </p>
+              </div>
+              <div className="pt-3 border-t border-white/5">
+                <div className="text-xs font-medium text-[#C8C3BA] mb-1">
+                  Ritmo y Cadencia de Montaje
+                </div>
+                <p className="text-sm text-[#EAE6DE] leading-relaxed">
+                  {sequence.audioAnalysis.rhythmAndPacing}
+                </p>
+              </div>
+            </div>
+
+            <div className="p-4 rounded-xl border border-white/10 bg-[#131318] space-y-3">
+              <div>
+                <div className="text-xs font-medium text-[#C8C3BA] mb-1.5">
+                  Efectos de Sonido Detectados / Capturados
+                </div>
+                <ul className="space-y-1.5 text-sm text-[#D4CFC7] list-disc pl-4">
+                  {sequence.audioAnalysis.detectedSoundEffects.map((sfx, idx) => (
+                    <li key={idx}>{sfx}</li>
+                  ))}
+                </ul>
+              </div>
+              <div className="pt-3 border-t border-white/5">
+                <div className="text-xs font-medium text-[#C8C3BA] mb-1">
+                  Recomendaciones de Dirección
+                </div>
+                <p className="text-sm text-[#EAE6DE] leading-relaxed">
+                  {sequence.audioAnalysis.directingRecommendations}
+                </p>
+              </div>
+            </div>
+          </div>
+
+          <div className="p-4 rounded-xl border border-white/10 bg-[#0D0D11] space-y-2">
+            <div className="text-xs font-medium text-[#E5A93C]">
+              Transcripción Verbatim del Material de Audio
+            </div>
+            <p className="font-mono-tech text-xs text-[#D4CFC7] leading-relaxed whitespace-pre-wrap">
+              {sequence.audioAnalysis.transcription}
+            </p>
+          </div>
+        </section>
+      )}
     </div>
   );
 }

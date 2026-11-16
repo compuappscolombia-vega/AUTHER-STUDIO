@@ -1,0 +1,18 @@
+[
+  {
+    "id": "lesson-seed-01",
+    "category": "camera",
+    "insight": "En secuencias épicas IMAX 1.43:1, priorizar planos generales sostenidos (8–12s) con desplazamiento lento en Technocrane antes de cortar a primeros planos de 50mm.",
+    "rating": 5,
+    "sourceProjectTitle": "El Libro de Enoc — La Vigilia del Hermón",
+    "createdAt": "2025-05-10T10:00:00.000Z"
+  },
+  {
+    "id": "lesson-seed-02",
+    "category": "sound",
+    "insight": "Cuando el material fuente sea un audiolibro con pausas tensas, insertar beats explícitos de silencio dramático de 1.5s antes del golpe subgrave LFE (32–40 Hz).",
+    "rating": 5,
+    "sourceProjectTitle": "La Última Frecuencia (Audiolibro)",
+    "createdAt": "2025-05-12T15:00:00.000Z"
+  }
+]
