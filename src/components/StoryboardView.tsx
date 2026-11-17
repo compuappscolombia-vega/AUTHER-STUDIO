@@ -7,12 +7,14 @@ import type {
 } from '../types/studio';
 
 interface StoryboardViewProps {
+  userId: string;
   projectId: string;
   sequence: ProductionSequence;
   onProjectMediaUpdated: (project: ProductionProject) => Promise<void>;
 }
 
 export function StoryboardView({
+  userId,
   projectId,
   sequence,
   onProjectMediaUpdated,
@@ -54,7 +56,10 @@ export function StoryboardView({
     try {
       const res = await fetch('/api/generate-image', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          'x-user-id': userId,
+        },
         body: JSON.stringify({
           projectId,
           sequenceId: sequence.id,
@@ -87,7 +92,10 @@ export function StoryboardView({
     try {
       const res = await fetch('/api/generate-video', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          'x-user-id': userId,
+        },
         body: JSON.stringify({
           projectId,
           sequenceId: sequence.id,

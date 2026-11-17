@@ -5,7 +5,6 @@ import path from 'path';
 import multer from 'multer';
 import { fileURLToPath } from 'url';
 import { GoogleGenAI, ThinkingLevel, Type } from '@google/genai';
-import { SEED_PROJECTS } from './src/data/seedProjects';
 import type {
   AudioAnalysisReport,
   LearningCategory,
@@ -28,8 +27,7 @@ const __dirname = path.dirname(__filename);
 
 const PORT = Number(process.env.PORT) || 3000;
 const WORKSPACE_DIR = path.resolve(__dirname, 'workspace');
-const PROJECTS_ROOT = path.join(WORKSPACE_DIR, 'projects');
-const LEARNING_FILE = path.join(WORKSPACE_DIR, 'learning_memory.json');
+const USERS_WORKSPACE_ROOT = path.join(WORKSPACE_DIR, 'users');
 
 const AUDIO_EXTENSIONS = new Set([
   '.mp3',
@@ -50,47 +48,59 @@ function sanitizeSlug(raw: string): string {
   return raw.replace(/[^a-zA-Z0-9._-]/g, '_');
 }
 
-function getProjectDir(projectId: string): string {
-  const safeId = sanitizeSlug(projectId);
-  return path.join(PROJECTS_ROOT, safeId);
+function getRequestUserId(req: express.Request): string {
+  const fromHeader = req.headers['x-user-id'];
+  const headerVal = Array.isArray(fromHeader) ? fromHeader[0] : fromHeader;
+  const queryVal = typeof req.query?.userId === 'string' ? req.query.userId : '';
+  const bodyVal = typeof req.body?.userId === 'string' ? req.body.userId : '';
+  const raw = (headerVal || queryVal || bodyVal || 'default').trim();
+  return sanitizeSlug(raw).slice(0, 120) || 'default';
 }
 
-function getProjectJsonPath(projectId: string): string {
-  return path.join(getProjectDir(projectId), 'project.json');
+function getUserProjectsRoot(userId: string): string {
+  return path.join(USERS_WORKSPACE_ROOT, sanitizeSlug(userId), 'projects');
 }
 
-function getProjectAssetsDir(projectId: string): string {
-  return path.join(getProjectDir(projectId), 'assets');
+function getProjectDir(userId: string, projectId: string): string {
+  return path.join(getUserProjectsRoot(userId), sanitizeSlug(projectId));
 }
 
-function writeProjectFolder(project: ProductionProject): void {
-  const dir = getProjectDir(project.id);
-  const assetsDir = getProjectAssetsDir(project.id);
+function getProjectJsonPath(userId: string, projectId: string): string {
+  return path.join(getProjectDir(userId, projectId), 'project.json');
+}
+
+function getProjectAssetsDir(userId: string, projectId: string): string {
+  return path.join(getProjectDir(userId, projectId), 'assets');
+}
+
+function getLearningFile(userId: string): string {
+  return path.join(USERS_WORKSPACE_ROOT, sanitizeSlug(userId), 'learning_memory.json');
+}
+
+function writeProjectFolder(userId: string, project: ProductionProject): void {
+  const assetsDir = getProjectAssetsDir(userId, project.id);
   fs.mkdirSync(assetsDir, { recursive: true });
-  fs.writeFileSync(getProjectJsonPath(project.id), JSON.stringify(project, null, 2), 'utf-8');
+  fs.writeFileSync(
+    getProjectJsonPath(userId, project.id),
+    JSON.stringify(project, null, 2),
+    'utf-8'
+  );
 }
 
-function ensureWorkspaceProjects(): ProductionProject[] {
-  fs.mkdirSync(PROJECTS_ROOT, { recursive: true });
-  const entries = fs.readdirSync(PROJECTS_ROOT, { withFileTypes: true });
+function ensureWorkspaceProjects(userId: string): ProductionProject[] {
+  const root = getUserProjectsRoot(userId);
+  fs.mkdirSync(root, { recursive: true });
+  const entries = fs.readdirSync(root, { withFileTypes: true });
   const folders = entries.filter((e) => e.isDirectory());
-
-  if (folders.length === 0) {
-    for (const seed of SEED_PROJECTS) {
-      writeProjectFolder(seed);
-    }
-    return SEED_PROJECTS;
-  }
 
   const projects: ProductionProject[] = [];
   for (const folder of folders) {
-    const jsonPath = path.join(PROJECTS_ROOT, folder.name, 'project.json');
+    const jsonPath = path.join(root, folder.name, 'project.json');
     if (!fs.existsSync(jsonPath)) continue;
     try {
       const raw = fs.readFileSync(jsonPath, 'utf-8');
       const parsed = JSON.parse(raw) as ProductionProject;
       if (parsed && parsed.id) {
-        // Normalize versionStatus for backwards compatibility
         parsed.sequences = (parsed.sequences || []).map((seq) => ({
           ...seq,
           versionStatus: seq.versionStatus === 'final' ? 'final' : 'draft',
@@ -102,19 +112,12 @@ function ensureWorkspaceProjects(): ProductionProject[] {
     }
   }
 
-  if (projects.length === 0) {
-    for (const seed of SEED_PROJECTS) {
-      writeProjectFolder(seed);
-    }
-    return SEED_PROJECTS;
-  }
-
   return projects.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
 }
 
-function readProjectById(projectId: string): ProductionProject | null {
-  ensureWorkspaceProjects();
-  const jsonPath = getProjectJsonPath(projectId);
+function readProjectById(userId: string, projectId: string): ProductionProject | null {
+  ensureWorkspaceProjects(userId);
+  const jsonPath = getProjectJsonPath(userId, projectId);
   if (!fs.existsSync(jsonPath)) return null;
   try {
     const raw = fs.readFileSync(jsonPath, 'utf-8');
@@ -124,49 +127,26 @@ function readProjectById(projectId: string): ProductionProject | null {
   }
 }
 
-const DEFAULT_LEARNING_LESSONS: LearningLesson[] = [
-  {
-    id: 'lesson-seed-01',
-    category: 'camera',
-    insight:
-      'En secuencias épicas IMAX 1.43:1, priorizar planos generales sostenidos (8–12s) con desplazamiento lento en Technocrane antes de cortar a primeros planos de 50mm.',
-    rating: 5,
-    sourceProjectTitle: 'El Libro de Enoc — La Vigilia del Hermón',
-    createdAt: '2025-05-10T10:00:00.000Z',
-  },
-  {
-    id: 'lesson-seed-02',
-    category: 'sound',
-    insight:
-      'Cuando el material fuente sea un audiolibro con pausas tensas, insertar beats explícitos de silencio dramático de 1.5s antes del golpe subgrave LFE (32–40 Hz).',
-    rating: 5,
-    sourceProjectTitle: 'La Última Frecuencia (Audiolibro)',
-    createdAt: '2025-05-12T15:00:00.000Z',
-  },
-];
-
-function ensureLearningMemory(): LearningLesson[] {
-  fs.mkdirSync(WORKSPACE_DIR, { recursive: true });
-  if (!fs.existsSync(LEARNING_FILE)) {
-    fs.writeFileSync(
-      LEARNING_FILE,
-      JSON.stringify(DEFAULT_LEARNING_LESSONS, null, 2),
-      'utf-8'
-    );
-    return DEFAULT_LEARNING_LESSONS;
+function ensureLearningMemory(userId: string): LearningLesson[] {
+  const file = getLearningFile(userId);
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  if (!fs.existsSync(file)) {
+    fs.writeFileSync(file, JSON.stringify([], null, 2), 'utf-8');
+    return [];
   }
   try {
-    const raw = fs.readFileSync(LEARNING_FILE, 'utf-8');
+    const raw = fs.readFileSync(file, 'utf-8');
     const parsed = JSON.parse(raw) as LearningLesson[];
-    return Array.isArray(parsed) ? parsed : DEFAULT_LEARNING_LESSONS;
+    return Array.isArray(parsed) ? parsed : [];
   } catch {
-    return DEFAULT_LEARNING_LESSONS;
+    return [];
   }
 }
 
-function saveLearningMemory(lessons: LearningLesson[]): void {
-  fs.mkdirSync(WORKSPACE_DIR, { recursive: true });
-  fs.writeFileSync(LEARNING_FILE, JSON.stringify(lessons, null, 2), 'utf-8');
+function saveLearningMemory(userId: string, lessons: LearningLesson[]): void {
+  const file = getLearningFile(userId);
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.writeFileSync(file, JSON.stringify(lessons, null, 2), 'utf-8');
 }
 
 function getGenAIClient(): GoogleGenAI {
@@ -204,10 +184,11 @@ function isAudioFilename(filename: string): boolean {
 }
 
 function saveUploadedAsset(
+  userId: string,
   project: ProductionProject,
   file: Express.Multer.File
 ): { updatedProject: ProductionProject; asset: ProjectAsset } {
-  const assetsDir = getProjectAssetsDir(project.id);
+  const assetsDir = getProjectAssetsDir(userId, project.id);
   fs.mkdirSync(assetsDir, { recursive: true });
   const ext = path.extname(file.originalname).toLowerCase();
   const baseName = sanitizeSlug(path.basename(file.originalname, ext)).slice(0, 60);
@@ -227,7 +208,7 @@ function saveUploadedAsset(
     kind,
     mimeType: inferMimeType(file.originalname, file.mimetype),
     sizeBytes: file.size,
-    url: `/workspace-assets/${encodeURIComponent(project.id)}/${encodeURIComponent(storedName)}`,
+    url: `/workspace-assets/${encodeURIComponent(userId)}/${encodeURIComponent(project.id)}/${encodeURIComponent(storedName)}`,
     createdAt: new Date().toISOString(),
   };
 
@@ -236,11 +217,12 @@ function saveUploadedAsset(
     assets: [asset, ...(project.assets || [])],
     updatedAt: new Date().toISOString(),
   };
-  writeProjectFolder(updatedProject);
+  writeProjectFolder(userId, updatedProject);
   return { updatedProject, asset };
 }
 
 function saveGeneratedAssetBuffer(
+  userId: string,
   project: ProductionProject,
   params: {
     baseName: string;
@@ -250,7 +232,7 @@ function saveGeneratedAssetBuffer(
     kind: ProjectAsset['kind'];
   }
 ): { updatedProject: ProductionProject; asset: ProjectAsset } {
-  const assetsDir = getProjectAssetsDir(project.id);
+  const assetsDir = getProjectAssetsDir(userId, project.id);
   fs.mkdirSync(assetsDir, { recursive: true });
   const safeBase = sanitizeSlug(params.baseName).slice(0, 50) || 'asset';
   const storedName = `${Date.now().toString(36)}-${safeBase}${params.ext}`;
@@ -263,7 +245,7 @@ function saveGeneratedAssetBuffer(
     kind: params.kind,
     mimeType: params.mimeType,
     sizeBytes: params.buffer.byteLength,
-    url: `/workspace-assets/${encodeURIComponent(project.id)}/${encodeURIComponent(storedName)}`,
+    url: `/workspace-assets/${encodeURIComponent(userId)}/${encodeURIComponent(project.id)}/${encodeURIComponent(storedName)}`,
     createdAt: new Date().toISOString(),
   };
 
@@ -272,7 +254,7 @@ function saveGeneratedAssetBuffer(
     assets: [asset, ...(project.assets || [])],
     updatedAt: new Date().toISOString(),
   };
-  writeProjectFolder(updatedProject);
+  writeProjectFolder(userId, updatedProject);
   return { updatedProject, asset };
 }
 
@@ -297,10 +279,11 @@ function resolveLocalImageBase64(imageUrl?: string): { data: string; mimeType: s
     let targetPath: string | null = null;
     if (imageUrl.startsWith('/workspace-assets/')) {
       const parts = imageUrl.replace('/workspace-assets/', '').split('/');
-      if (parts.length === 2) {
-        const pid = sanitizeSlug(decodeURIComponent(parts[0]));
-        const fname = sanitizeSlug(decodeURIComponent(parts[1]));
-        targetPath = path.join(getProjectAssetsDir(pid), fname);
+      if (parts.length === 3) {
+        const uid = sanitizeSlug(decodeURIComponent(parts[0]));
+        const pid = sanitizeSlug(decodeURIComponent(parts[1]));
+        const fname = sanitizeSlug(decodeURIComponent(parts[2]));
+        targetPath = path.join(getProjectAssetsDir(uid, pid), fname);
       }
     } else if (imageUrl.startsWith('/src/assets/')) {
       const rel = imageUrl.replace(/^\/+/, '');
@@ -534,11 +517,12 @@ async function startServer() {
   const app = express();
   app.use(express.json({ limit: '4mb' }));
 
-  // Serve per-project saved assets safely
-  app.get('/workspace-assets/:projectId/:filename', (req, res) => {
+  // Serve per-user project saved assets safely
+  app.get('/workspace-assets/:userId/:projectId/:filename', (req, res) => {
+    const userId = sanitizeSlug(req.params.userId);
     const projectId = sanitizeSlug(req.params.projectId);
     const filename = sanitizeSlug(req.params.filename);
-    const filePath = path.join(getProjectAssetsDir(projectId), filename);
+    const filePath = path.join(getProjectAssetsDir(userId, projectId), filename);
     if (!fs.existsSync(filePath)) {
       res.status(404).json({ error: 'Asset no encontrado.' });
       return;
@@ -550,19 +534,21 @@ async function startServer() {
     res.json({ ok: true });
   });
 
-  // Projects CRUD (per-project folder + project.json)
-  app.get('/api/projects', (_req, res) => {
-    const projects = ensureWorkspaceProjects();
+  // Projects CRUD (per-user folder + project.json)
+  app.get('/api/projects', (req, res) => {
+    const userId = getRequestUserId(req);
+    const projects = ensureWorkspaceProjects(userId);
     res.json({ projects });
   });
 
   app.post('/api/projects', (req, res) => {
+    const userId = getRequestUserId(req);
     const { title, genreStyle, defaultSourceType, continuityBible } = req.body ?? {};
     if (!title || typeof title !== 'string' || !title.trim()) {
       res.status(400).json({ error: 'El título del proyecto es obligatorio.' });
       return;
     }
-    ensureWorkspaceProjects();
+    ensureWorkspaceProjects(userId);
     const now = new Date().toISOString();
     const newProject: ProductionProject = {
       id: `proj-${Date.now().toString(36)}`,
@@ -581,14 +567,15 @@ async function startServer() {
       updatedAt: now,
       sequences: [],
     };
-    writeProjectFolder(newProject);
+    writeProjectFolder(userId, newProject);
     res.status(201).json({ project: newProject });
   });
 
   app.patch('/api/projects/:id', (req, res) => {
+    const userId = getRequestUserId(req);
     const { id } = req.params;
     const { title, genreStyle, continuityBible } = req.body ?? {};
-    const existing = readProjectById(id);
+    const existing = readProjectById(userId, id);
     if (!existing) {
       res.status(404).json({ error: 'Proyecto no encontrado.' });
       return;
@@ -604,13 +591,14 @@ async function startServer() {
         typeof continuityBible === 'string' ? continuityBible : existing.continuityBible,
       updatedAt: new Date().toISOString(),
     };
-    writeProjectFolder(updatedProject);
+    writeProjectFolder(userId, updatedProject);
     res.json({ project: updatedProject });
   });
 
   app.delete('/api/projects/:id', (req, res) => {
+    const userId = getRequestUserId(req);
     const { id } = req.params;
-    const dir = getProjectDir(id);
+    const dir = getProjectDir(userId, id);
     if (!fs.existsSync(dir)) {
       res.status(404).json({ error: 'Proyecto no encontrado.' });
       return;
@@ -621,8 +609,9 @@ async function startServer() {
 
   // Finalize a sequence (Draft -> Final Version) + extract automatic self-learning lessons
   app.patch('/api/projects/:id/sequences/:seqId/finalize', (req, res) => {
+    const userId = getRequestUserId(req);
     const { id, seqId } = req.params;
-    const project = readProjectById(id);
+    const project = readProjectById(userId, id);
     if (!project) {
       res.status(404).json({ error: 'Proyecto no encontrado.' });
       return;
@@ -647,10 +636,10 @@ async function startServer() {
       updatedAt: new Date().toISOString(),
       sequences: updatedSequences,
     };
-    writeProjectFolder(updatedProject);
+    writeProjectFolder(userId, updatedProject);
 
     // Extract automatic lessons into self-learning memory if not already final
-    let lessons = ensureLearningMemory();
+    let lessons = ensureLearningMemory(userId);
     if (currentSeq.versionStatus !== 'final') {
       const autoLessons = extractAutomaticLessons(project.title, finalizedSeq).map((item, i) => ({
         ...item,
@@ -658,7 +647,7 @@ async function startServer() {
         createdAt: new Date().toISOString(),
       }));
       lessons = [...autoLessons, ...lessons];
-      saveLearningMemory(lessons);
+      saveLearningMemory(userId, lessons);
     }
 
     res.json({
@@ -670,6 +659,7 @@ async function startServer() {
 
   // Studio Intelligence: Rate a sequence's camera, lighting & soundscape outcomes (1-5)
   app.patch('/api/projects/:id/sequences/:seqId/rate', (req, res) => {
+    const userId = getRequestUserId(req);
     const { id, seqId } = req.params;
     const rating = Number(req.body?.rating);
     const note = typeof req.body?.note === 'string' ? req.body.note.trim() : '';
@@ -679,7 +669,7 @@ async function startServer() {
       return;
     }
 
-    const project = readProjectById(id);
+    const project = readProjectById(userId, id);
     if (!project) {
       res.status(404).json({ error: 'Proyecto no encontrado.' });
       return;
@@ -703,9 +693,9 @@ async function startServer() {
       updatedAt: new Date().toISOString(),
       sequences: updatedSequences,
     };
-    writeProjectFolder(updatedProject);
+    writeProjectFolder(userId, updatedProject);
 
-    let lessons = ensureLearningMemory();
+    let lessons = ensureLearningMemory(userId);
     if (rating >= 4) {
       const extracted = buildRatedChoiceLessons({
         projectTitle: project.title,
@@ -718,7 +708,7 @@ async function startServer() {
         createdAt: new Date().toISOString(),
       }));
       lessons = [...extracted, ...lessons];
-      saveLearningMemory(lessons);
+      saveLearningMemory(userId, lessons);
     }
 
     res.json({
@@ -731,6 +721,7 @@ async function startServer() {
   // Nano Image Generation (gemini-nano-banana-2.1 / gemini-3.1-flash-lite-image)
   app.post('/api/generate-image', async (req, res) => {
     try {
+      const userId = getRequestUserId(req);
       const { projectId, sequenceId, frameId, prompt, aspectRatio, quality } = req.body ?? {};
       const pid = String(projectId || '').trim();
       const sid = String(sequenceId || '').trim();
@@ -742,7 +733,7 @@ async function startServer() {
         return;
       }
 
-      let project = readProjectById(pid);
+      let project = readProjectById(userId, pid);
       if (!project) {
         res.status(404).json({ error: 'Proyecto no encontrado.' });
         return;
@@ -786,7 +777,7 @@ async function startServer() {
 
       const ext = mimeType.includes('jpeg') || mimeType.includes('jpg') ? '.jpg' : '.png';
       const buffer = Buffer.from(imageBase64, 'base64');
-      const saved = saveGeneratedAssetBuffer(project, {
+      const saved = saveGeneratedAssetBuffer(userId, project, {
         baseName: `nano-${fid || 'frame'}`,
         ext,
         mimeType,
@@ -811,7 +802,7 @@ async function startServer() {
                 : s
             ),
           };
-          writeProjectFolder(project);
+          writeProjectFolder(userId, project);
         }
       }
 
@@ -831,6 +822,7 @@ async function startServer() {
   // Omni Flash Video Generation (gemini-omni-1.2-flash via Interactions API)
   app.post('/api/generate-video', async (req, res) => {
     try {
+      const userId = getRequestUserId(req);
       const { projectId, sequenceId, frameId, prompt, aspectRatio, duration, imageUrl } =
         req.body ?? {};
       const pid = String(projectId || '').trim();
@@ -843,7 +835,7 @@ async function startServer() {
         return;
       }
 
-      let project = readProjectById(pid);
+      let project = readProjectById(userId, pid);
       if (!project) {
         res.status(404).json({ error: 'Proyecto no encontrado.' });
         return;
@@ -912,7 +904,7 @@ async function startServer() {
         throw new Error('Respuesta de video vacía.');
       }
 
-      const saved = saveGeneratedAssetBuffer(project, {
+      const saved = saveGeneratedAssetBuffer(userId, project, {
         baseName: `omniflash-${fid || 'clip'}`,
         ext: '.mp4',
         mimeType,
@@ -936,7 +928,7 @@ async function startServer() {
                 : s
             ),
           };
-          writeProjectFolder(project);
+          writeProjectFolder(userId, project);
         }
       }
 
@@ -954,12 +946,14 @@ async function startServer() {
   });
 
   // Self-Learning Memory Endpoints
-  app.get('/api/learning', (_req, res) => {
-    const lessons = ensureLearningMemory();
+  app.get('/api/learning', (req, res) => {
+    const userId = getRequestUserId(req);
+    const lessons = ensureLearningMemory(userId);
     res.json({ lessons });
   });
 
   app.post('/api/learning', (req, res) => {
+    const userId = getRequestUserId(req);
     const { category, insight, rating, sourceProjectTitle } = req.body ?? {};
     const validCategories: LearningCategory[] = [
       'camera',
@@ -978,7 +972,7 @@ async function startServer() {
       return;
     }
 
-    const lessons = ensureLearningMemory();
+    const lessons = ensureLearningMemory(userId);
     const newLesson: LearningLesson = {
       id: `lesson-${Date.now().toString(36)}`,
       category: validCategories.includes(category) ? category : 'camera',
@@ -988,25 +982,27 @@ async function startServer() {
       createdAt: new Date().toISOString(),
     };
     const updated = [newLesson, ...lessons];
-    saveLearningMemory(updated);
+    saveLearningMemory(userId, updated);
     res.status(201).json({ lesson: newLesson, lessons: updated });
   });
 
   app.delete('/api/learning/:id', (req, res) => {
+    const userId = getRequestUserId(req);
     const { id } = req.params;
-    const lessons = ensureLearningMemory();
+    const lessons = ensureLearningMemory(userId);
     const filtered = lessons.filter((l) => l.id !== id);
     if (filtered.length === lessons.length) {
       res.status(404).json({ error: 'Lección no encontrada.' });
       return;
     }
-    saveLearningMemory(filtered);
+    saveLearningMemory(userId, filtered);
     res.json({ ok: true, lessons: filtered });
   });
 
   // Standalone Audio Analysis & Transcription endpoint
   app.post('/api/analyze-audio', upload.single('audioFile'), async (req, res) => {
     try {
+      const userId = getRequestUserId(req);
       const file = req.file;
       const projectId = String(req.body?.projectId || '').trim();
       if (!file) {
@@ -1020,16 +1016,16 @@ async function startServer() {
         return;
       }
 
-      let activeProject = projectId ? readProjectById(projectId) : null;
+      let activeProject = projectId ? readProjectById(userId, projectId) : null;
       if (activeProject) {
-        const saved = saveUploadedAsset(activeProject, file);
+        const saved = saveUploadedAsset(userId, activeProject, file);
         activeProject = saved.updatedProject;
       }
 
       const ai = getGenAIClient();
       const mimeType = inferMimeType(file.originalname, file.mimetype);
       const verbatimTranscript = await transcribeAudioWithGemini(ai, file.buffer, mimeType);
-      const lessons = ensureLearningMemory();
+      const lessons = ensureLearningMemory(userId);
       const learningContext = buildLearningPromptContext(lessons, 6);
 
       const response = await ai.models.generateContent({
@@ -1087,6 +1083,7 @@ Genera un informe profesional en español que capture:
   // Full Production Generation (Book, Audio MP3/WAV/M4A/OGG, or Story)
   app.post('/api/produce', upload.single('sourceFile'), async (req, res) => {
     try {
+      const userId = getRequestUserId(req);
       const body = req.body ?? {};
       const projectId = String(body.projectId || '').trim();
       const sequenceTitle = String(body.sequenceTitle || '').trim();
@@ -1115,7 +1112,7 @@ Genera un informe profesional en español que capture:
         return;
       }
 
-      let project = readProjectById(projectId);
+      let project = readProjectById(userId, projectId);
       if (!project) {
         res.status(404).json({ error: 'Proyecto no encontrado en el estudio.' });
         return;
@@ -1130,7 +1127,7 @@ Genera un informe profesional en español que capture:
 
       if (file) {
         sourceFilename = file.originalname;
-        const saved = saveUploadedAsset(project, file);
+        const saved = saveUploadedAsset(userId, project, file);
         project = saved.updatedProject;
 
         const ext = path.extname(file.originalname).toLowerCase();
@@ -1154,7 +1151,7 @@ Genera un informe profesional en español que capture:
         }
       }
 
-      const lessons = ensureLearningMemory();
+      const lessons = ensureLearningMemory(userId);
       const learningContext = buildLearningPromptContext(lessons, 8);
 
       const audioInstructions = isAudioUpload
@@ -1269,7 +1266,7 @@ Genera el expediente completo de dirección en JSON estructurado siguiendo el es
         sequences: [createdSequence, ...project.sequences],
       };
 
-      writeProjectFolder(updatedProject);
+      writeProjectFolder(userId, updatedProject);
 
       res.json({
         project: updatedProject,

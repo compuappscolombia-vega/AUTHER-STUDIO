@@ -79,10 +79,27 @@ export function ProjectSidebar({
       </div>
 
       <div className="flex-1 overflow-y-auto p-3 space-y-1.5">
-        {filtered.length === 0 ? (
+        {projects.length === 0 ? (
+          <div className="py-10 px-3 text-center space-y-3">
+            <p className="text-xs text-[#9A968E] leading-relaxed">
+              Sin producciones aún. Inicia un proyecto nuevo desde cero.
+            </p>
+            <button
+              type="button"
+              onClick={() => {
+                onOpenNewProject();
+                onCloseMobile();
+              }}
+              className="inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg bg-[#E5A93C] hover:bg-[#EDA949] text-[#0B0B0E] text-xs font-semibold transition-colors"
+            >
+              <FolderPlus className="w-3.5 h-3.5" />
+              <span>Nuevo proyecto</span>
+            </button>
+          </div>
+        ) : filtered.length === 0 ? (
           <div className="py-10 px-3 text-center">
             <p className="text-xs text-[#9A968E]">
-              Ninguna producción coincide con "{searchQuery}".
+              Ninguna producción coincide con &ldquo;{searchQuery}&rdquo;.
             </p>
           </div>
         ) : (

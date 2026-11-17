@@ -3,6 +3,7 @@ import {
   CheckCircle2,
   Clapperboard,
   FileDown,
+  FolderPlus,
   Library,
   Lock,
   PanelLeftClose,
@@ -27,8 +28,8 @@ import { StoryboardView } from './components/StoryboardView';
 import { NewProjectModal } from './components/NewProjectModal';
 import { AgentBlueprintModal } from './components/AgentBlueprintModal';
 import { AuthModal } from './components/AuthModal';
+import { AuthGate } from './components/AuthGate';
 import { LearningModal } from './components/LearningModal';
-import { SEED_PROJECTS } from './data/seedProjects';
 import { useAuth } from './context/AuthContext';
 import {
   canExportPdfForSequence,
@@ -51,16 +52,18 @@ import {
   updateProjectContinuityInFirestore,
 } from './services/firestoreSync';
 
-const LOCAL_CACHE_KEY = 'auteur_studio_projects_v2';
+const LEGACY_CACHE_KEY = 'auteur_studio_projects_v2';
+
+function getUserCacheKey(uid: string): string {
+  return `auteur_studio_projects_v3_${uid}`;
+}
 
 export default function App() {
-  const { user, isVerified } = useAuth();
+  const { user, loading: authLoading, isVerified } = useAuth();
 
-  const [projects, setProjects] = useState<ProductionProject[]>(SEED_PROJECTS);
-  const [activeProjectId, setActiveProjectId] = useState<string>(SEED_PROJECTS[0].id);
-  const [activeSequenceId, setActiveSequenceId] = useState<string>(
-    SEED_PROJECTS[0].sequences[0]?.id || ''
-  );
+  const [projects, setProjects] = useState<ProductionProject[]>([]);
+  const [activeProjectId, setActiveProjectId] = useState<string>('');
+  const [activeSequenceId, setActiveSequenceId] = useState<string>('');
   const [lessons, setLessons] = useState<LearningLesson[]>([]);
   const [activeTab, setActiveTab] = useState<WorkspaceTab>('vision');
   const [searchQuery, setSearchQuery] = useState('');
@@ -75,25 +78,42 @@ export default function App() {
   const [exportingPdf, setExportingPdf] = useState(false);
   const [produceError, setProduceError] = useState<string | null>(null);
 
-  // Load workspace projects + self-learning memory from server on mount
+  // Purge legacy unauthenticated cache if present
   useEffect(() => {
+    try {
+      localStorage.removeItem(LEGACY_CACHE_KEY);
+    } catch {
+      // Ignore storage failures
+    }
+  }, []);
+
+  // Load user-scoped workspace & Firestore cloud projects ONLY after verified login
+  useEffect(() => {
+    if (!user || !isVerified) {
+      setProjects([]);
+      setLessons([]);
+      setActiveProjectId('');
+      setActiveSequenceId('');
+      setProduceError(null);
+      return;
+    }
+
+    const uid = user.uid;
+    const cacheKey = getUserCacheKey(uid);
     let cancelled = false;
-    async function loadFromServer() {
+
+    async function loadUserWorkspace() {
+      let localProjects: ProductionProject[] = [];
       try {
         const [projRes, learnRes] = await Promise.all([
-          fetch('/api/projects'),
-          fetch('/api/learning'),
+          fetch('/api/projects', { headers: { 'x-user-id': uid } }),
+          fetch('/api/learning', { headers: { 'x-user-id': uid } }),
         ]);
 
         if (projRes.ok) {
           const data = (await projRes.json()) as { projects: ProductionProject[] };
-          if (!cancelled && Array.isArray(data.projects) && data.projects.length > 0) {
-            setProjects(data.projects);
-            setActiveProjectId((prev) => {
-              const exists = data.projects.some((p) => p.id === prev);
-              return exists ? prev : data.projects[0].id;
-            });
-            localStorage.setItem(LOCAL_CACHE_KEY, JSON.stringify(data.projects));
+          if (Array.isArray(data.projects)) {
+            localProjects = data.projects;
           }
         }
 
@@ -104,56 +124,51 @@ export default function App() {
           }
         }
       } catch {
-        const cached = localStorage.getItem(LOCAL_CACHE_KEY);
-        if (!cancelled && cached) {
+        const cached = localStorage.getItem(cacheKey);
+        if (cached) {
           try {
             const parsed = JSON.parse(cached) as ProductionProject[];
-            if (Array.isArray(parsed) && parsed.length > 0) {
-              setProjects(parsed);
+            if (Array.isArray(parsed)) {
+              localProjects = parsed;
             }
           } catch {
-            // Keep SEED_PROJECTS
+            localProjects = [];
           }
         }
       }
-    }
-    loadFromServer();
-    return () => {
-      cancelled = true;
-    };
-  }, []);
 
-  // Sync Firestore cloud projects and learning memory when authenticated & email verified
-  useEffect(() => {
-    if (!user || !isVerified) return;
-    let cancelled = false;
+      if (cancelled) return;
 
-    async function syncCloud() {
+      let merged = localProjects;
       try {
-        const cloudProjects = await loadUserProjectsFromFirestore(user!.uid);
-        if (cancelled) return;
-        if (cloudProjects.length > 0) {
-          setProjects((prev) => {
-            const cloudIds = new Set(cloudProjects.map((p) => p.id));
-            const localOnly = prev.filter((p) => !cloudIds.has(p.id));
-            const merged = [...cloudProjects, ...localOnly];
-            localStorage.setItem(LOCAL_CACHE_KEY, JSON.stringify(merged));
-            return merged;
-          });
-        } else {
-          // Seed initial projects to user's Firestore workspace once authenticated
-          for (const seedProj of projects.slice(0, 3)) {
-            await saveProjectToFirestore(user!.uid, seedProj);
-          }
+        const cloudProjects = await loadUserProjectsFromFirestore(uid);
+        if (!cancelled && cloudProjects.length > 0) {
+          const cloudIds = new Set(cloudProjects.map((p) => p.id));
+          const localOnly = localProjects.filter((p) => !cloudIds.has(p.id));
+          merged = [...cloudProjects, ...localOnly];
         }
       } catch (err) {
         console.error('Error cargando proyectos desde Firestore:', err);
       }
+
+      if (cancelled) return;
+      setProjects(merged);
+      localStorage.setItem(cacheKey, JSON.stringify(merged));
+      setActiveProjectId((prev) => {
+        if (prev && merged.some((p) => p.id === prev)) return prev;
+        return merged[0]?.id || '';
+      });
+      setActiveSequenceId((prev) => {
+        if (!merged.length) return '';
+        const target = merged.find((p) => p.id === activeProjectId) || merged[0];
+        if (prev && target?.sequences.some((s) => s.id === prev)) return prev;
+        return target?.sequences[0]?.id || '';
+      });
     }
 
-    void syncCloud();
+    void loadUserWorkspace();
 
-    const unsubLessons = subscribeLessonsFromFirestore(user.uid, (cloudLessons) => {
+    const unsubLessons = subscribeLessonsFromFirestore(uid, (cloudLessons) => {
       if (!cancelled && cloudLessons.length > 0) {
         setLessons(cloudLessons);
       }
@@ -164,6 +179,24 @@ export default function App() {
       unsubLessons();
     };
   }, [user?.uid, isVerified]);
+
+  if (authLoading) {
+    return (
+      <div className="min-h-screen bg-[#0B0B0E] text-[#F2F0EB] flex flex-col items-center justify-center gap-3 p-6">
+        <Clapperboard className="w-7 h-7 text-[#E5A93C]" />
+        <div className="font-display text-base font-semibold">AUTEUR Studio</div>
+        <p className="text-xs text-[#8D8981]">Verificando sesión de usuario...</p>
+      </div>
+    );
+  }
+
+  // Mandatory Authentication Gate: unauthenticated or unverified users cannot enter the workspace
+  if (!user || !isVerified) {
+    return <AuthGate />;
+  }
+
+  const currentUid = user.uid;
+  const userCacheKey = getUserCacheKey(currentUid);
 
   const activeProject =
     projects.find((p) => p.id === activeProjectId) || projects[0] || null;
@@ -200,7 +233,10 @@ export default function App() {
   }) {
     const res = await fetch('/api/projects', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        'x-user-id': currentUid,
+      },
       body: JSON.stringify(payload),
     });
     const data = await res.json();
@@ -210,21 +246,22 @@ export default function App() {
     const created = data.project as ProductionProject;
     const next = [created, ...projects];
     setProjects(next);
-    localStorage.setItem(LOCAL_CACHE_KEY, JSON.stringify(next));
+    localStorage.setItem(userCacheKey, JSON.stringify(next));
     setActiveProjectId(created.id);
     setActiveSequenceId('');
     setShowIngest(true);
 
-    if (user && isVerified) {
-      await saveProjectToFirestore(user.uid, created);
-    }
+    await saveProjectToFirestore(currentUid, created);
   }
 
   async function handleSaveContinuity(continuityBible: string) {
     if (!activeProject) return;
     const res = await fetch(`/api/projects/${activeProject.id}`, {
       method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        'x-user-id': currentUid,
+      },
       body: JSON.stringify({ continuityBible }),
     });
     const data = await res.json();
@@ -235,11 +272,9 @@ export default function App() {
     const updatedProj = data.project as ProductionProject;
     const next = projects.map((p) => (p.id === updatedProj.id ? updatedProj : p));
     setProjects(next);
-    localStorage.setItem(LOCAL_CACHE_KEY, JSON.stringify(next));
+    localStorage.setItem(userCacheKey, JSON.stringify(next));
 
-    if (user && isVerified) {
-      await updateProjectContinuityInFirestore(user.uid, updatedProj.id, continuityBible);
-    }
+    await updateProjectContinuityInFirestore(currentUid, updatedProj.id, continuityBible);
   }
 
   async function handleAnalyzeAudioOnly(
@@ -251,6 +286,7 @@ export default function App() {
     fd.append('audioFile', file);
     const res = await fetch('/api/analyze-audio', {
       method: 'POST',
+      headers: { 'x-user-id': currentUid },
       body: fd,
     });
     const data = await res.json();
@@ -261,7 +297,7 @@ export default function App() {
       const updatedProj = data.project as ProductionProject;
       setProjects((prev) => {
         const next = prev.map((p) => (p.id === updatedProj.id ? updatedProj : p));
-        localStorage.setItem(LOCAL_CACHE_KEY, JSON.stringify(next));
+        localStorage.setItem(userCacheKey, JSON.stringify(next));
         return next;
       });
     }
@@ -274,6 +310,7 @@ export default function App() {
     try {
       const res = await fetch('/api/produce', {
         method: 'POST',
+        headers: { 'x-user-id': currentUid },
         body: formData,
       });
       const data = await res.json();
@@ -284,14 +321,12 @@ export default function App() {
       const newSeq = data.sequence as ProductionSequence;
       const next = projects.map((p) => (p.id === updatedProj.id ? updatedProj : p));
       setProjects(next);
-      localStorage.setItem(LOCAL_CACHE_KEY, JSON.stringify(next));
+      localStorage.setItem(userCacheKey, JSON.stringify(next));
       setActiveSequenceId(newSeq.id);
       setActiveTab('vision');
 
-      if (user && isVerified) {
-        await saveProjectToFirestore(user.uid, updatedProj);
-        await saveSequenceToFirestore(user.uid, updatedProj.id, newSeq);
-      }
+      await saveProjectToFirestore(currentUid, updatedProj);
+      await saveSequenceToFirestore(currentUid, updatedProj.id, newSeq);
     } catch (err) {
       setProduceError(
         err instanceof Error ? err.message : 'No se pudo completar la producción.'
@@ -308,7 +343,10 @@ export default function App() {
     try {
       const res = await fetch(
         `/api/projects/${activeProject.id}/sequences/${activeSequence.id}/finalize`,
-        { method: 'PATCH' }
+        {
+          method: 'PATCH',
+          headers: { 'x-user-id': currentUid },
+        }
       );
       const data = await res.json();
       if (!res.ok) {
@@ -317,24 +355,22 @@ export default function App() {
       const updatedProj = data.project as ProductionProject;
       const next = projects.map((p) => (p.id === updatedProj.id ? updatedProj : p));
       setProjects(next);
-      localStorage.setItem(LOCAL_CACHE_KEY, JSON.stringify(next));
+      localStorage.setItem(userCacheKey, JSON.stringify(next));
       if (Array.isArray(data.lessons)) {
         setLessons(data.lessons);
       }
 
-      if (user && isVerified) {
-        await finalizeSequenceInFirestore(user.uid, activeProject.id, activeSequence.id);
-        const autoLessons = extractAutomaticLessons(activeProject.title, {
-          ...activeSequence,
-          versionStatus: 'final',
+      await finalizeSequenceInFirestore(currentUid, activeProject.id, activeSequence.id);
+      const autoLessons = extractAutomaticLessons(activeProject.title, {
+        ...activeSequence,
+        versionStatus: 'final',
+      });
+      for (let i = 0; i < autoLessons.length; i++) {
+        await addLessonToFirestore(currentUid, {
+          ...autoLessons[i],
+          id: `lesson-auto-${Date.now().toString(36)}-${i}`,
+          createdAt: new Date().toISOString(),
         });
-        for (let i = 0; i < autoLessons.length; i++) {
-          await addLessonToFirestore(user.uid, {
-            ...autoLessons[i],
-            id: `lesson-auto-${Date.now().toString(36)}-${i}`,
-            createdAt: new Date().toISOString(),
-          });
-        }
       }
     } catch (err) {
       setProduceError(
@@ -383,7 +419,10 @@ export default function App() {
   }) {
     const res = await fetch('/api/learning', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        'x-user-id': currentUid,
+      },
       body: JSON.stringify(payload),
     });
     const data = await res.json();
@@ -393,22 +432,23 @@ export default function App() {
     if (Array.isArray(data.lessons)) {
       setLessons(data.lessons);
     }
-    if (user && isVerified && data.lesson) {
-      await addLessonToFirestore(user.uid, data.lesson as LearningLesson);
+    if (data.lesson) {
+      await addLessonToFirestore(currentUid, data.lesson as LearningLesson);
     }
   }
 
   async function handleDeleteLesson(lessonId: string) {
-    const res = await fetch(`/api/learning/${lessonId}`, { method: 'DELETE' });
+    const res = await fetch(`/api/learning/${lessonId}`, {
+      method: 'DELETE',
+      headers: { 'x-user-id': currentUid },
+    });
     if (res.ok) {
       const data = await res.json();
       if (Array.isArray(data.lessons)) {
         setLessons(data.lessons);
       }
     }
-    if (user && isVerified) {
-      await deleteLessonFromFirestore(user.uid, lessonId);
-    }
+    await deleteLessonFromFirestore(currentUid, lessonId);
   }
 
   async function handleRateSequence(rating: number, note: string) {
@@ -418,7 +458,10 @@ export default function App() {
       `/api/projects/${activeProject.id}/sequences/${activeSequence.id}/rate`,
       {
         method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          'x-user-id': currentUid,
+        },
         body: JSON.stringify({ rating, note }),
       }
     );
@@ -432,12 +475,12 @@ export default function App() {
       const updatedProj = data.project as ProductionProject;
       const next = projects.map((p) => (p.id === updatedProj.id ? updatedProj : p));
       setProjects(next);
-      localStorage.setItem(LOCAL_CACHE_KEY, JSON.stringify(next));
+      localStorage.setItem(userCacheKey, JSON.stringify(next));
     }
     if (Array.isArray(data.lessons)) {
       setLessons(data.lessons);
     }
-    if (user && isVerified && rating >= 4) {
+    if (rating >= 4) {
       const extracted = buildRatedChoiceLessons({
         projectTitle: activeProject.title,
         sequence: activeSequence,
@@ -445,7 +488,7 @@ export default function App() {
         note,
       });
       for (let i = 0; i < extracted.length; i++) {
-        await addLessonToFirestore(user.uid, {
+        await addLessonToFirestore(currentUid, {
           ...extracted[i],
           id: `lesson-rate-${Date.now().toString(36)}-${i}`,
           createdAt: new Date().toISOString(),
@@ -466,19 +509,17 @@ export default function App() {
   async function handleProjectMediaUpdated(updatedProj: ProductionProject) {
     const next = projects.map((p) => (p.id === updatedProj.id ? updatedProj : p));
     setProjects(next);
-    localStorage.setItem(LOCAL_CACHE_KEY, JSON.stringify(next));
+    localStorage.setItem(userCacheKey, JSON.stringify(next));
 
-    if (user && isVerified && activeSequence) {
+    if (activeSequence) {
       const updatedSeq = updatedProj.sequences.find((s) => s.id === activeSequence.id);
       if (updatedSeq && updatedSeq.versionStatus === 'draft') {
-        await saveSequenceToFirestore(user.uid, updatedProj.id, updatedSeq);
+        await saveSequenceToFirestore(currentUid, updatedProj.id, updatedSeq);
       }
     }
   }
 
-  const userLabel = user
-    ? user.displayName || user.email?.split('@')[0] || 'Director'
-    : null;
+  const userLabel = user.displayName || user.email?.split('@')[0] || 'Director';
 
   return (
     <div className="h-screen flex flex-col overflow-hidden bg-[#0B0B0E] text-[#F2F0EB]">
@@ -518,22 +559,6 @@ export default function App() {
           </button>
         ))}
       </nav>
-
-      {/* Unverified email notice (only shown if signed in without email verification) */}
-      {user && !isVerified && (
-        <div className="px-5 py-2 border-b border-[#E5A93C]/25 bg-[#1B170E] flex flex-wrap items-center justify-between gap-2 text-xs text-[#F4D08A] shrink-0">
-          <span>
-            Cuenta creada ({user.email}). Verifica tu correo para activar el guardado en la nube.
-          </span>
-          <button
-            type="button"
-            onClick={() => setAuthOpen(true)}
-            className="font-semibold underline hover:text-white"
-          >
-            Verificar ahora
-          </button>
-        </div>
-      )}
 
       <div className="flex-1 flex overflow-hidden">
         <ProjectSidebar
@@ -720,13 +745,14 @@ export default function App() {
                   {activeTab === 'storyboard' && activeProject && (
                     <StoryboardView
                       key={activeSequence.id}
+                      userId={currentUid}
                       projectId={activeProject.id}
                       sequence={activeSequence}
                       onProjectMediaUpdated={handleProjectMediaUpdated}
                     />
                   )}
                 </>
-              ) : (
+              ) : activeProject ? (
                 <div className="py-20 max-w-md mx-auto text-center space-y-4">
                   <Clapperboard className="w-9 h-9 text-[#E5A93C] mx-auto" />
                   <h2 className="font-display text-xl font-semibold text-[#F2F0EB]">
@@ -745,6 +771,28 @@ export default function App() {
                       Abrir mesa de ingesta
                     </button>
                   )}
+                </div>
+              ) : (
+                <div className="py-20 max-w-lg mx-auto text-center space-y-5">
+                  <Clapperboard className="w-10 h-10 text-[#E5A93C] mx-auto" />
+                  <div className="space-y-2">
+                    <h1 className="font-display text-2xl font-semibold text-[#F2F0EB]">
+                      Nuevo proyecto cinematográfico
+                    </h1>
+                    <p className="text-sm text-[#9A968E] leading-relaxed">
+                      Tu mesa de dirección comienza completamente en blanco. Crea tu primer
+                      proyecto para adaptar un libro, analizar un audiolibro o dirigir una
+                      historia original desde cero.
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setNewProjectOpen(true)}
+                    className="inline-flex items-center gap-2 px-5 py-2.5 rounded-lg bg-[#E5A93C] hover:bg-[#EDA949] text-[#0B0B0E] text-xs font-semibold transition-colors"
+                  >
+                    <FolderPlus className="w-4 h-4" />
+                    <span>Crear nueva producción</span>
+                  </button>
                 </div>
               )}
             </div>

@@ -13,7 +13,7 @@ import type { ProductionProject, ProductionSequence } from '../types/studio';
 
 const sampleSequence: ProductionSequence = {
   id: 'seq-1',
-  title: 'Capítulo VI: El Juramento del Hermón',
+  title: 'Capítulo I: El Cruce del Puente',
   versionStatus: 'final',
   sourceType: 'book',
   directorStyle: 'Épica Monumental IMAX',
@@ -21,15 +21,15 @@ const sampleSequence: ProductionSequence = {
   cameraSystem: 'ARRI Alexa 65',
   lensPackage: 'Panavision Sphero 65',
   filmStockOrLut: 'Kodak 2383 Contrast',
-  logline: 'Doscientos seres celestiales sellan un pacto irreversible en la cumbre helada.',
-  directorVision: 'Escala monumental y silencio sagrado.',
-  colorPalette: [{ name: 'Obsidiana', hex: '#0E1015', role: 'Roca basáltica' }],
+  logline: 'Dos viajeros cruzan un puente colgante bajo la tormenta invernal.',
+  directorVision: 'Escala monumental y silencio tenso.',
+  colorPalette: [{ name: 'Obsidiana', hex: '#0E1015', role: 'Roca y sombras' }],
   lighting: {
     keyLight: 'Luz lunar cenital fría',
     fillRatio: '8:1 Chiaroscuro',
     rimAndBacklight: 'Halo plateado a contraluz',
     colorTemperatureKelvin: '5800K / 2900K',
-    atmosphereAndHaze: 'Niebla estratosférica densa',
+    atmosphereAndHaze: 'Niebla densa sobre el cañón',
   },
   shotList: [
     {
@@ -38,8 +38,8 @@ const sampleSequence: ProductionSequence = {
       lensMm: '24mm',
       movement: 'Technocrane descendente',
       durationSec: 18,
-      framingNote: 'Cumbre rodeada de nubes',
-      psychologicalIntent: 'Aislamiento cósmico',
+      framingNote: 'Puente rodeado de niebla',
+      psychologicalIntent: 'Aislamiento ante la inmensidad',
     },
     {
       shotNumber: '01B',
@@ -47,51 +47,51 @@ const sampleSequence: ProductionSequence = {
       lensMm: '85mm',
       movement: 'Fijo en trípode pesado',
       durationSec: 12,
-      framingNote: 'Pupila dilatándose',
-      psychologicalIntent: 'Nacimiento del deseo',
+      framingNote: 'Mano sujetando la cuerda',
+      psychologicalIntent: 'Tensión inminente',
     },
   ],
   soundDesign: {
-    atmosLayers: ['Viento estratosférico'],
+    atmosLayers: ['Viento de cañón'],
     subBassCue: '22 Hz constante',
-    foleyDetails: ['Hielo cristalizándose'],
-    silenceBeats: '2 segundos antes del juramento',
+    foleyDetails: ['Madera crujiendo'],
+    silenceBeats: '2 segundos antes del paso final',
     musicalScore: 'Coro disonante y cuerno de bronce',
     tempoBpm: 56,
   },
   vfx: {
-    cgiElements: ['Anillos de luz geométrica'],
-    practicalSfx: ['Nieve volcánica en set'],
-    locationsAndSets: 'Islandia / Monte Hermón',
-    wardrobeAndMakeup: 'Túnicas de mercurio oscuro',
+    cgiElements: ['Extensión de abismo'],
+    practicalSfx: ['Nieve artificial en set'],
+    locationsAndSets: 'Cañón rocoso norteño',
+    wardrobeAndMakeup: 'Abrigos de cuero y lana oscura',
   },
   screenplay: [
     {
       sceneNumber: '01',
-      slugline: 'EXT. CUMBRE DEL MONTE HERMÓN - NOCHE',
+      slugline: 'EXT. PUENTE COLGANTE DEL NORTE - NOCHE',
       timeOfDay: 'NOCHE',
       beats: [
-        { type: 'camera', text: 'Plano aéreo IMAX descendiendo sobre la meseta.' },
+        { type: 'camera', text: 'Plano aéreo IMAX descendiendo sobre el puente.' },
         {
           type: 'dialogue',
-          character: 'SEMJÂZÂ',
-          parenthetical: 'voz grave',
-          text: 'Me temo que no aceptaréis hacer este acto.',
+          character: 'ELENA',
+          parenthetical: 'voz firme',
+          text: 'No mires hacia abajo hasta alcanzar el otro lado.',
         },
       ],
     },
   ],
   storyboardFrames: [],
-  continuitySummary: 'Pacto sellado en el Hermón por los 200 Vigilantes.',
+  continuitySummary: 'Los viajeros logran cruzar antes del colapso.',
   createdAt: '2026-11-16T10:00:00.000Z',
 };
 
 const sampleProject: ProductionProject = {
-  id: 'proj-enoch',
-  title: 'El Libro de Enoc',
-  genreStyle: 'Épica Mitológica IMAX',
+  id: 'proj-sample',
+  title: 'Crónicas del Invierno',
+  genreStyle: 'Épica IMAX',
   defaultSourceType: 'book',
-  continuityBible: 'Vigilantes sin alas de pluma.',
+  continuityBible: 'Contraste frío en exteriores.',
   createdAt: '2026-11-16T10:00:00.000Z',
   updatedAt: '2026-11-16T10:00:00.000Z',
   sequences: [sampleSequence],
@@ -129,7 +129,7 @@ test('filterProjects filters by title, genre, or sequence title', () => {
     genreStyle: 'Neo-Noir',
     sequences: [],
   };
-  assert.equal(filterProjects([sampleProject, other], 'hermón').length, 1);
+  assert.equal(filterProjects([sampleProject, other], 'puente').length, 1);
   assert.equal(filterProjects([sampleProject, other], 'noir').length, 1);
   assert.equal(filterProjects([sampleProject, other], '').length, 2);
 });
@@ -144,21 +144,21 @@ test('computeProjectStats aggregates shots and duration accurately', () => {
 test('buildContinuationContext appends without duplicating', () => {
   const updated = buildContinuationContext(
     'Regla base.',
-    'Cap. VI',
-    'Pacto sellado.'
+    'Cap. I',
+    'Cruce completado.'
   );
-  assert.match(updated, /\[Cap\. VI\]: Pacto sellado\./);
-  const deduplicated = buildContinuationContext(updated, 'Cap. VI', 'Pacto sellado.');
+  assert.match(updated, /\[Cap\. I\]: Cruce completado\./);
+  const deduplicated = buildContinuationContext(updated, 'Cap. I', 'Cruce completado.');
   assert.equal(deduplicated, updated);
 });
 
 test('formatScreenplayMarkdown and formatFountainScreenplay emit structured exports', () => {
   const md = formatScreenplayMarkdown(sampleProject.title, sampleSequence);
-  assert.match(md, /EL LIBRO DE ENOC/);
-  assert.match(md, /EXT\. CUMBRE DEL MONTE HERMÓN - NOCHE/);
-  assert.match(md, /\*\*SEMJÂZÂ\*\*/);
+  assert.match(md, /CRÓNICAS DEL INVIERNO/);
+  assert.match(md, /EXT\. PUENTE COLGANTE DEL NORTE - NOCHE/);
+  assert.match(md, /\*\*ELENA\*\*/);
 
   const fountain = formatFountainScreenplay(sampleProject.title, sampleSequence);
-  assert.match(fountain, /Title: El Libro de Enoc/);
-  assert.match(fountain, /SEMJÂZÂ/);
+  assert.match(fountain, /Title: Crónicas del Invierno/);
+  assert.match(fountain, /ELENA/);
 });

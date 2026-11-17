@@ -349,7 +349,7 @@ export function SourceIngestPanel({
             placeholder={
               fileIsAudio
                 ? 'Ej: Escena Sonora: La Llamada Nocturna'
-                : 'Ej: Capítulo VII: Los Gigantes y las Enseñanzas'
+                : 'Ej: Capítulo I: La Llegada al Puerto'
             }
             className="w-full rounded-lg border border-white/12 bg-[#0B0B0E] px-3 py-2 text-xs text-[#F2F0EB] placeholder:text-[#6E6A63] focus:border-[#E5A93C] focus:outline-none"
           />

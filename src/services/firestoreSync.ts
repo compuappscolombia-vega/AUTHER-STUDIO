@@ -5,12 +5,12 @@ import {
   getDoc,
   getDocs,
   onSnapshot,
-  orderBy,
   query,
   serverTimestamp,
   setDoc,
   Timestamp,
   updateDoc,
+  where,
   type Unsubscribe,
 } from 'firebase/firestore';
 import type { User } from 'firebase/auth';
@@ -37,31 +37,63 @@ function toIsoString(val: unknown): string {
   return new Date().toISOString();
 }
 
+function stripUndefined<T>(value: T): T {
+  if (Array.isArray(value)) {
+    return value.map((item) => stripUndefined(item)) as unknown as T;
+  }
+  if (value !== null && typeof value === 'object') {
+    const out: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
+      if (v !== undefined) {
+        out[k] = stripUndefined(v);
+      }
+    }
+    return out as T;
+  }
+  return value;
+}
+
+const inFlightProfileSync = new Map<string, Promise<void>>();
+
 export async function ensureUserProfileInFirestore(user: User): Promise<void> {
   if (!user.emailVerified) return;
   const userId = sanitizeId(user.uid);
-  const userPath = `users/${userId}`;
-  const ref = doc(db, 'users', userId);
-  try {
-    const snap = await getDoc(ref);
-    if (!snap.exists()) {
-      const displayName = (
-        user.displayName ||
-        user.email?.split('@')[0] ||
-        'Director AUTEUR'
-      ).slice(0, 120);
-      await setDoc(ref, {
-        uid: userId,
-        displayName,
-        email: (user.email || 'director@auteur.studio').slice(0, 200),
-        role: 'director',
-        createdAt: serverTimestamp(),
-        updatedAt: serverTimestamp(),
-      });
-    }
-  } catch (error) {
-    handleFirestoreError(error, OperationType.WRITE, userPath);
+  const existing = inFlightProfileSync.get(userId);
+  if (existing) {
+    return existing;
   }
+
+  const run = (async () => {
+    const userPath = `users/${userId}`;
+    const ref = doc(db, 'users', userId);
+    try {
+      const snap = await getDoc(ref);
+      if (!snap.exists()) {
+        const rawName =
+          user.displayName?.trim() ||
+          user.email?.split('@')[0]?.trim() ||
+          'Director AUTEUR';
+        const displayName = rawName.slice(0, 120) || 'Director AUTEUR';
+        const rawEmail = user.email?.trim() || 'director@auteur.studio';
+        const email = (rawEmail.length >= 3 ? rawEmail : 'director@auteur.studio').slice(0, 200);
+        await setDoc(ref, {
+          uid: userId,
+          displayName,
+          email,
+          role: 'director',
+          createdAt: serverTimestamp(),
+          updatedAt: serverTimestamp(),
+        });
+      }
+    } catch (error) {
+      handleFirestoreError(error, OperationType.WRITE, userPath);
+    } finally {
+      inFlightProfileSync.delete(userId);
+    }
+  })();
+
+  inFlightProfileSync.set(userId, run);
+  return run;
 }
 
 export async function saveProjectToFirestore(
@@ -124,7 +156,7 @@ export async function saveSequenceToFirestore(
 
   try {
     const snap = await getDoc(seqRef);
-    const sequenceData = {
+    const sequenceData = stripUndefined({
       sourceFilename: sequence.sourceFilename || null,
       cameraSystem: sequence.cameraSystem,
       lensPackage: sequence.lensPackage,
@@ -137,7 +169,7 @@ export async function saveSequenceToFirestore(
       vfx: sequence.vfx,
       screenplay: sequence.screenplay,
       storyboardFrames: sequence.storyboardFrames,
-    };
+    });
 
     if (!snap.exists()) {
       await setDoc(seqRef, {
@@ -239,7 +271,7 @@ export async function loadUserProjectsFromFirestore(
   const projectsPath = `users/${uid}/projects`;
   try {
     const projectsSnap = await getDocs(
-      query(collection(db, 'users', uid, 'projects'), orderBy('updatedAt', 'desc'))
+      query(collection(db, 'users', uid, 'projects'), where('ownerId', '==', uid))
     );
     const result: ProductionProject[] = [];
 
@@ -248,7 +280,7 @@ export async function loadUserProjectsFromFirestore(
       const seqSnap = await getDocs(
         query(
           collection(db, 'users', uid, 'projects', pDoc.id, 'sequences'),
-          orderBy('createdAt', 'desc')
+          where('ownerId', '==', uid)
         )
       );
       const sequences: ProductionSequence[] = seqSnap.docs.map((sDoc) => {
@@ -282,6 +314,8 @@ export async function loadUserProjectsFromFirestore(
         };
       });
 
+      sequences.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+
       result.push({
         id: String(p.id || pDoc.id),
         title: String(p.title || 'Proyecto'),
@@ -294,6 +328,7 @@ export async function loadUserProjectsFromFirestore(
       });
     }
 
+    result.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
     return result;
   } catch (error) {
     handleFirestoreError(error, OperationType.LIST, projectsPath);
@@ -344,22 +379,24 @@ export function subscribeLessonsFromFirestore(
   const lessonPath = `users/${uid}/learning_memory`;
   const q = query(
     collection(db, 'users', uid, 'learning_memory'),
-    orderBy('createdAt', 'desc')
+    where('ownerId', '==', uid)
   );
   return onSnapshot(
     q,
     (snap) => {
-      const items: LearningLesson[] = snap.docs.map((d) => {
-        const data = d.data();
-        return {
-          id: String(data.id || d.id),
-          category: data.category,
-          insight: String(data.insight || ''),
-          rating: Number(data.rating || 5),
-          sourceProjectTitle: String(data.sourceProjectTitle || 'AUTEUR Studio'),
-          createdAt: toIsoString(data.createdAt),
-        };
-      });
+      const items: LearningLesson[] = snap.docs
+        .map((d) => {
+          const data = d.data();
+          return {
+            id: String(data.id || d.id),
+            category: data.category,
+            insight: String(data.insight || ''),
+            rating: Number(data.rating || 5),
+            sourceProjectTitle: String(data.sourceProjectTitle || 'AUTEUR Studio'),
+            createdAt: toIsoString(data.createdAt),
+          };
+        })
+        .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
       onLessons(items);
     },
     (error) => {
