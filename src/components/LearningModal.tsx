@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Brain, Plus, Star, Trash2, X } from 'lucide-react';
 import type { LearningCategory, LearningLesson } from '../types/studio';
 import {
@@ -34,9 +34,31 @@ export function LearningModal({
   const [rating, setRating] = useState(5);
   const [insight, setInsight] = useState('');
   const [busy, setBusy] = useState(false);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
+  useEffect(() => {
+    if (!open) return;
+    function onKeyDown(e: KeyboardEvent) {
+      if (e.key === 'Escape') onClose();
+    }
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [open, onClose]);
+
   if (!open) return null;
+
+  async function handleDelete(lessonId: string) {
+    setDeletingId(lessonId);
+    setError(null);
+    try {
+      await onDeleteLesson(lessonId);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'No se pudo eliminar la lección.');
+    } finally {
+      setDeletingId(null);
+    }
+  }
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -228,9 +250,10 @@ export function LearningModal({
                     </div>
                     <button
                       type="button"
-                      onClick={() => onDeleteLesson(lesson.id)}
+                      disabled={deletingId === lesson.id}
+                      onClick={() => void handleDelete(lesson.id)}
                       aria-label="Eliminar lección"
-                      className="p-1.5 rounded-md text-[#8D8981] hover:text-[#FCA5A5] hover:bg-white/5 shrink-0"
+                      className="p-1.5 rounded-md text-[#8D8981] hover:text-[#FCA5A5] hover:bg-white/5 disabled:opacity-50 shrink-0"
                     >
                       <Trash2 className="w-3.5 h-3.5" />
                     </button>

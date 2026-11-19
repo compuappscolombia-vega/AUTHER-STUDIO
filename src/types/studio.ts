@@ -1,6 +1,22 @@
 export type SourceMaterialType = 'book' | 'audiobook' | 'story';
 
-export type WorkspaceTab = 'vision' | 'shots' | 'screenplay' | 'storyboard' | 'trailer';
+export type WorkspaceTab = 'vision' | 'shots' | 'screenplay' | 'storyboard' | 'previs3d' | 'trailer';
+
+export type ScreenplayNoteRole = 'director' | 'producer';
+
+export interface ScreenplayNote {
+  id: string;
+  beatKey: string;
+  sceneNumber: string;
+  beatIndex: number;
+  beatType: 'action' | 'dialogue' | 'camera' | 'sound';
+  lineExcerpt: string;
+  authorRole: ScreenplayNoteRole;
+  authorName: string;
+  note: string;
+  createdAt: string;
+  resolved?: boolean;
+}
 
 export type ThinkingDepth = 'standard' | 'deep';
 
@@ -125,6 +141,7 @@ export interface VfxBreakdown {
 }
 
 export interface ScreenplayBeat {
+  id?: string;
   type: 'action' | 'dialogue' | 'camera' | 'sound';
   character?: string;
   parenthetical?: string;
@@ -175,6 +192,7 @@ export interface ProductionSequence {
   audioAnalysis?: AudioAnalysisReport;
   vfx: VfxBreakdown;
   screenplay: ScreenplayScene[];
+  screenplayNotes?: ScreenplayNote[];
   storyboardFrames: StoryboardCard[];
   continuitySummary: string;
   sequenceRating?: number;

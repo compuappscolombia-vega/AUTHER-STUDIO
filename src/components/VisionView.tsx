@@ -47,7 +47,23 @@ export function VisionView({
   const [ratingNote, setRatingNote] = useState('');
   const [savingRating, setSavingRating] = useState(false);
   const [ratingSavedMsg, setRatingSavedMsg] = useState<string | null>(null);
+  const [ratingErrorMsg, setRatingErrorMsg] = useState<string | null>(null);
   const [applyingId, setApplyingId] = useState<string | null>(null);
+
+  const colorPalette = sequence.colorPalette || [];
+  const lighting = sequence.lighting || {
+    keyLight: 'No especificado',
+    fillRatio: '4:1',
+    rimAndBacklight: 'No especificado',
+    colorTemperatureKelvin: '4500K',
+    atmosphereAndHaze: 'Natural',
+  };
+  const vfx = sequence.vfx || {
+    cgiElements: [],
+    practicalSfx: [],
+    locationsAndSets: 'No especificado',
+    wardrobeAndMakeup: 'No especificado',
+  };
 
   async function handleCopyHex(hex: string) {
     try {
@@ -74,6 +90,7 @@ export function VisionView({
     e.preventDefault();
     setSavingRating(true);
     setRatingSavedMsg(null);
+    setRatingErrorMsg(null);
     try {
       await onRateSequence(selectedRating, ratingNote);
       setRatingNote('');
@@ -83,6 +100,10 @@ export function VisionView({
           : 'Valoración guardada en la secuencia.'
       );
       setTimeout(() => setRatingSavedMsg(null), 3500);
+    } catch (err) {
+      setRatingErrorMsg(
+        err instanceof Error ? err.message : 'No se pudo guardar la valoración.'
+      );
     } finally {
       setSavingRating(false);
     }
@@ -90,8 +111,13 @@ export function VisionView({
 
   async function handleApply(enhancement: DirectorialEnhancement) {
     setApplyingId(enhancement.id);
+    setRatingErrorMsg(null);
     try {
       await onApplyEnhancement(enhancement.continuitySnippet);
+    } catch (err) {
+      setRatingErrorMsg(
+        err instanceof Error ? err.message : 'No se pudo aplicar la mejora a la Biblia.'
+      );
     } finally {
       setApplyingId(null);
     }
@@ -195,7 +221,7 @@ export function VisionView({
           02. Paleta de Color y Colorimetría
         </h3>
         <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
-          {sequence.colorPalette.map((swatch) => (
+          {colorPalette.map((swatch) => (
             <button
               key={`${swatch.name}-${swatch.hex}`}
               type="button"
@@ -232,15 +258,15 @@ export function VisionView({
           <div className="p-4 rounded-xl border border-white/10 bg-[#131318] space-y-3">
             <div>
               <div className="text-xs text-[#8D8981]">Luz Principal (Key Light)</div>
-              <div className="text-sm text-[#EAE6DE] mt-0.5">{sequence.lighting.keyLight}</div>
+              <div className="text-sm text-[#EAE6DE] mt-0.5">{lighting.keyLight}</div>
             </div>
             <div className="pt-3 border-t border-white/5">
               <div className="text-xs text-[#8D8981]">Ratio de Contraste / Relleno</div>
-              <div className="text-sm text-[#EAE6DE] mt-0.5">{sequence.lighting.fillRatio}</div>
+              <div className="text-sm text-[#EAE6DE] mt-0.5">{lighting.fillRatio}</div>
             </div>
             <div className="pt-3 border-t border-white/5">
               <div className="text-xs text-[#8D8981]">Contraluz y Perfilado (Rim)</div>
-              <div className="text-sm text-[#EAE6DE] mt-0.5">{sequence.lighting.rimAndBacklight}</div>
+              <div className="text-sm text-[#EAE6DE] mt-0.5">{lighting.rimAndBacklight}</div>
             </div>
           </div>
 
@@ -248,12 +274,12 @@ export function VisionView({
             <div>
               <div className="text-xs text-[#8D8981]">Temperaturas de Color (Kelvin)</div>
               <div className="text-sm font-mono-tech text-[#EAE6DE] mt-0.5">
-                {sequence.lighting.colorTemperatureKelvin}
+                {lighting.colorTemperatureKelvin}
               </div>
             </div>
             <div className="pt-3 border-t border-white/5">
               <div className="text-xs text-[#8D8981]">Densidad Atmosférica y Niebla</div>
-              <div className="text-sm text-[#EAE6DE] mt-0.5">{sequence.lighting.atmosphereAndHaze}</div>
+              <div className="text-sm text-[#EAE6DE] mt-0.5">{lighting.atmosphereAndHaze}</div>
             </div>
           </div>
         </div>
@@ -270,7 +296,7 @@ export function VisionView({
               Efectos Visuales (CGI / Simulación)
             </div>
             <ul className="space-y-1.5 text-sm text-[#D4CFC7] list-disc pl-4">
-              {sequence.vfx.cgiElements.map((item, idx) => (
+              {(vfx.cgiElements || []).map((item, idx) => (
                 <li key={idx}>{item}</li>
               ))}
             </ul>
@@ -279,7 +305,7 @@ export function VisionView({
                 Efectos Prácticos en Set (SFX)
               </div>
               <ul className="space-y-1.5 text-sm text-[#D4CFC7] list-disc pl-4">
-                {sequence.vfx.practicalSfx.map((item, idx) => (
+                {(vfx.practicalSfx || []).map((item, idx) => (
                   <li key={idx}>{item}</li>
                 ))}
               </ul>
@@ -292,7 +318,7 @@ export function VisionView({
                 Locaciones y Construcción de Set
               </div>
               <p className="text-sm text-[#D4CFC7] leading-relaxed">
-                {sequence.vfx.locationsAndSets}
+                {vfx.locationsAndSets}
               </p>
             </div>
             <div className="pt-3 border-t border-white/5">
@@ -300,7 +326,7 @@ export function VisionView({
                 Vestuario, Texturas y Caracterización
               </div>
               <p className="text-sm text-[#D4CFC7] leading-relaxed">
-                {sequence.vfx.wardrobeAndMakeup}
+                {vfx.wardrobeAndMakeup}
               </p>
             </div>
           </div>
@@ -493,6 +519,11 @@ export function VisionView({
             </div>
             {ratingSavedMsg && (
               <p className="text-[11px] text-[#5EEAD4]">{ratingSavedMsg}</p>
+            )}
+            {ratingErrorMsg && (
+              <p role="alert" className="text-[11px] text-[#FCA5A5]">
+                {ratingErrorMsg}
+              </p>
             )}
           </div>
 

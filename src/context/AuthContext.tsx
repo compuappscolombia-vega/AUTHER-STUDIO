@@ -97,6 +97,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         } as unknown as User)
       : null
   );
+  const [, setAuthRevision] = useState(0);
   const [loading, setLoading] = useState(
     () => !detectLocalDevPreview() && !readStoredAdminSession()
   );
@@ -155,7 +156,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       displayName: params.displayName.trim(),
     });
     await sendEmailVerification(cred.user);
-    setFirebaseUser({ ...cred.user });
+    setFirebaseUser(cred.user);
+    setAuthRevision((r) => r + 1);
   }
 
   async function signInAsAdmin(params?: { email?: string; displayName?: string }) {
@@ -186,7 +188,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (!auth.currentUser) return false;
     await reload(auth.currentUser);
     const updated = auth.currentUser;
-    setFirebaseUser(updated ? ({ ...updated } as User) : null);
+    setFirebaseUser(updated ?? null);
+    setAuthRevision((r) => r + 1);
     if (updated?.emailVerified) {
       await ensureUserProfileInFirestore(updated);
       return true;

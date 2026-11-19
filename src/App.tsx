@@ -16,6 +16,7 @@ import type {
   LearningLesson,
   ProductionProject,
   ProductionSequence,
+  ScreenplayNoteRole,
   SourceMaterialType,
   StudioSettings,
   WorkspaceTab,
@@ -23,12 +24,15 @@ import type {
 import { TopBar } from './components/TopBar';
 import { ProjectSidebar } from './components/ProjectSidebar';
 import { TimelineBar } from './components/TimelineBar';
+import { WorkflowStepperBar } from './components/WorkflowStepperBar';
 import { SourceIngestPanel } from './components/SourceIngestPanel';
 import { VisionView } from './components/VisionView';
 import { ShotsAndSoundView } from './components/ShotsAndSoundView';
 import { ScreenplayView } from './components/ScreenplayView';
 import { StoryboardView } from './components/StoryboardView';
+import { ThreeDPrevisView } from './components/ThreeDPrevisView';
 import { TrailerView } from './components/TrailerView';
+import { LiveDirectorVoiceModal } from './components/LiveDirectorVoiceModal';
 import { NewProjectModal } from './components/NewProjectModal';
 import { AgentBlueprintModal } from './components/AgentBlueprintModal';
 import { AuthModal } from './components/AuthModal';
@@ -54,6 +58,7 @@ import {
   saveStudioSettings,
 } from './utils/productionPipeline';
 import { buildLocalPreviewFixture } from './utils/devPreviewFixture';
+import { parseApiResponse } from './utils/apiClient';
 import {
   addLessonToFirestore,
   deleteLessonFromFirestore,
@@ -69,6 +74,14 @@ const LEGACY_CACHE_KEY = 'auteur_studio_projects_v2';
 
 function getUserCacheKey(uid: string): string {
   return `auteur_studio_projects_v3_${uid}`;
+}
+
+function persistProjectsCache(key: string, projects: ProductionProject[]) {
+  try {
+    localStorage.setItem(key, JSON.stringify(projects));
+  } catch {
+    // Ignore storage quota or restricted iframe errors
+  }
 }
 
 export default function App() {
@@ -92,6 +105,8 @@ export default function App() {
   const [learningOpen, setLearningOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [adminLabOpen, setAdminLabOpen] = useState(false);
+  const [liveVoiceOpen, setLiveVoiceOpen] = useState(false);
+  const [isReadingMode, setIsReadingMode] = useState(false);
   const [isProducing, setIsProducing] = useState(false);
   const [finalizingSeq, setFinalizingSeq] = useState(false);
   const [exportingPdf, setExportingPdf] = useState(false);
@@ -105,6 +120,13 @@ export default function App() {
       // Ignore storage failures
     }
   }, []);
+
+  // Automatically exit Reading Mode when leaving Screenplay tab
+  useEffect(() => {
+    if (activeTab !== 'screenplay' && isReadingMode) {
+      setIsReadingMode(false);
+    }
+  }, [activeTab, isReadingMode]);
 
   // Load user-scoped workspace & Firestore cloud projects ONLY after verified login
   useEffect(() => {
@@ -131,29 +153,35 @@ export default function App() {
         ]);
 
         if (projRes.ok) {
-          const data = (await projRes.json()) as { projects: ProductionProject[] };
+          const data = await parseApiResponse<{ projects?: ProductionProject[] }>(
+            projRes,
+            'No se pudieron cargar los proyectos.'
+          );
           if (Array.isArray(data.projects)) {
             localProjects = data.projects;
           }
         }
 
         if (learnRes.ok) {
-          const learnData = (await learnRes.json()) as { lessons: LearningLesson[] };
+          const learnData = await parseApiResponse<{ lessons?: LearningLesson[] }>(
+            learnRes,
+            'No se pudieron cargar las lecciones.'
+          );
           if (!cancelled && Array.isArray(learnData.lessons)) {
             setLessons(learnData.lessons);
           }
         }
       } catch {
-        const cached = localStorage.getItem(cacheKey);
-        if (cached) {
-          try {
+        try {
+          const cached = localStorage.getItem(cacheKey);
+          if (cached) {
             const parsed = JSON.parse(cached) as ProductionProject[];
             if (Array.isArray(parsed)) {
               localProjects = parsed;
             }
-          } catch {
-            localProjects = [];
           }
+        } catch {
+          localProjects = [];
         }
       }
 
@@ -177,16 +205,21 @@ export default function App() {
 
       if (cancelled) return;
       setProjects(merged);
-      localStorage.setItem(cacheKey, JSON.stringify(merged));
-      setActiveProjectId((prev) => {
-        if (prev && merged.some((p) => p.id === prev)) return prev;
-        return merged[0]?.id || '';
-      });
-      setActiveSequenceId((prev) => {
-        if (!merged.length) return '';
-        const target = merged.find((p) => p.id === activeProjectId) || merged[0];
-        if (prev && target?.sequences.some((s) => s.id === prev)) return prev;
-        return target?.sequences[0]?.id || '';
+      persistProjectsCache(cacheKey, merged);
+      setActiveProjectId((prevProjId) => {
+        const resolvedProjId =
+          prevProjId && merged.some((p) => p.id === prevProjId)
+            ? prevProjId
+            : merged[0]?.id || '';
+        const targetProj = merged.find((p) => p.id === resolvedProjId) || merged[0];
+        setActiveSequenceId((prevSeqId) => {
+          if (!targetProj) return '';
+          if (prevSeqId && targetProj.sequences.some((s) => s.id === prevSeqId)) {
+            return prevSeqId;
+          }
+          return targetProj.sequences[0]?.id || '';
+        });
+        return resolvedProjId;
       });
     }
 
@@ -204,7 +237,7 @@ export default function App() {
       cancelled = true;
       unsubLessons();
     };
-  }, [user?.uid, isVerified, skipCloudSync]);
+  }, [user, isVerified, skipCloudSync, isLocalDevPreview]);
 
   if (authLoading) {
     return (
@@ -263,6 +296,35 @@ export default function App() {
     saveStudioSettings(currentUid, next);
   }
 
+  async function ensureProjectSyncedOnServer(projectSnapshot?: ProductionProject | null) {
+    const target = projectSnapshot || activeProject;
+    if (!target) return;
+    try {
+      const res = await fetch('/api/projects/sync', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-user-id': currentUid,
+        },
+        body: JSON.stringify({ project: target }),
+      });
+      if (!res.ok) return;
+      const data = await parseApiResponse<{ project?: ProductionProject }>(
+        res,
+        'No se pudo sincronizar el proyecto con el servidor.'
+      );
+      if (data.project) {
+        setProjects((prev) => {
+          const next = prev.map((p) => (p.id === data.project!.id ? data.project! : p));
+          persistProjectsCache(userCacheKey, next);
+          return next;
+        });
+      }
+    } catch {
+      // Allow server action to proceed or fail cleanly with explicit error
+    }
+  }
+
   async function handleCreateProject(payload: {
     title: string;
     genreStyle: string;
@@ -277,36 +339,30 @@ export default function App() {
       },
       body: JSON.stringify(payload),
     });
-    const data = await res.json();
-    if (!res.ok) {
-      throw new Error(data.error || 'Error al crear la producción.');
-    }
-    const created = data.project as ProductionProject;
+    const data = await parseApiResponse<{ project: ProductionProject }>(
+      res,
+      'Error al crear la producción.'
+    );
+    const created = data.project;
     const next = [created, ...projects];
     setProjects(next);
-    localStorage.setItem(userCacheKey, JSON.stringify(next));
+    persistProjectsCache(userCacheKey, next);
     setActiveProjectId(created.id);
     setActiveSequenceId('');
     setShowIngest(true);
 
     if (!skipCloudSync) {
-      await saveProjectToFirestore(currentUid, created);
+      try {
+        await saveProjectToFirestore(currentUid, created);
+      } catch (err) {
+        console.warn('No se pudo sincronizar proyecto en Firestore:', err);
+      }
     }
   }
 
   async function handleSaveContinuity(continuityBible: string) {
     if (!activeProject) return;
-    if (isLocalDevPreview && activeProject.id === 'proj-preview-odisea') {
-      const updatedProj: ProductionProject = {
-        ...activeProject,
-        continuityBible,
-        updatedAt: new Date().toISOString(),
-      };
-      const next = projects.map((p) => (p.id === updatedProj.id ? updatedProj : p));
-      setProjects(next);
-      localStorage.setItem(userCacheKey, JSON.stringify(next));
-      return;
-    }
+    await ensureProjectSyncedOnServer(activeProject);
 
     const res = await fetch(`/api/projects/${activeProject.id}`, {
       method: 'PATCH',
@@ -316,18 +372,23 @@ export default function App() {
       },
       body: JSON.stringify({ continuityBible }),
     });
-    const data = await res.json();
-    if (!res.ok) {
-      setProduceError(data.error || 'No se pudo guardar la biblia.');
-      return;
-    }
-    const updatedProj = data.project as ProductionProject;
-    const next = projects.map((p) => (p.id === updatedProj.id ? updatedProj : p));
-    setProjects(next);
-    localStorage.setItem(userCacheKey, JSON.stringify(next));
+    const data = await parseApiResponse<{ project: ProductionProject }>(
+      res,
+      'No se pudo guardar la biblia.'
+    );
+    const updatedProj = data.project;
+    setProjects((prev) => {
+      const next = prev.map((p) => (p.id === updatedProj.id ? updatedProj : p));
+      persistProjectsCache(userCacheKey, next);
+      return next;
+    });
 
     if (!skipCloudSync) {
-      await updateProjectContinuityInFirestore(currentUid, updatedProj.id, continuityBible);
+      try {
+        await updateProjectContinuityInFirestore(currentUid, updatedProj.id, continuityBible);
+      } catch (err) {
+        console.warn('No se pudo actualizar continuidad en Firestore:', err);
+      }
     }
   }
 
@@ -335,6 +396,9 @@ export default function App() {
     projectId: string,
     file: File
   ): Promise<AudioAnalysisReport> {
+    const targetProj = projects.find((p) => p.id === projectId) || activeProject;
+    await ensureProjectSyncedOnServer(targetProj);
+
     const fd = new FormData();
     fd.append('projectId', projectId);
     fd.append('audioFile', file);
@@ -343,42 +407,45 @@ export default function App() {
       headers: { 'x-user-id': currentUid },
       body: fd,
     });
-    const data = await res.json();
-    if (!res.ok) {
-      throw new Error(data.error || 'Error analizando el archivo de audio.');
-    }
+    const data = await parseApiResponse<{
+      project?: ProductionProject;
+      report: AudioAnalysisReport;
+    }>(res, 'Error analizando el archivo de audio.');
     if (data.project) {
-      const updatedProj = data.project as ProductionProject;
+      const updatedProj = data.project;
       setProjects((prev) => {
         const next = prev.map((p) => (p.id === updatedProj.id ? updatedProj : p));
-        localStorage.setItem(userCacheKey, JSON.stringify(next));
+        persistProjectsCache(userCacheKey, next);
         return next;
       });
     }
-    return data.report as AudioAnalysisReport;
+    return data.report;
   }
 
   async function handleAnalyzeChapters(formData: FormData): Promise<ProductionProject | null> {
     setProduceError(null);
+    await ensureProjectSyncedOnServer(activeProject);
     const res = await fetch('/api/analyze-chapters', {
       method: 'POST',
       headers: { 'x-user-id': currentUid },
       body: formData,
     });
-    const data = await res.json();
-    if (!res.ok) {
-      const msg = data.error || 'No se pudo extraer la estructura de capítulos.';
-      setProduceError(msg);
-      throw new Error(msg);
-    }
-    const updatedProj = data.project as ProductionProject;
+    const data = await parseApiResponse<{ project: ProductionProject }>(
+      res,
+      'No se pudo extraer la estructura de capítulos.'
+    );
+    const updatedProj = data.project;
     setProjects((prev) => {
       const next = prev.map((p) => (p.id === updatedProj.id ? updatedProj : p));
-      localStorage.setItem(userCacheKey, JSON.stringify(next));
+      persistProjectsCache(userCacheKey, next);
       return next;
     });
     if (!skipCloudSync) {
-      await saveProjectToFirestore(currentUid, updatedProj);
+      try {
+        await saveProjectToFirestore(currentUid, updatedProj);
+      } catch (err) {
+        console.warn('No se pudo guardar capítulos en Firestore:', err);
+      }
     }
     return updatedProj;
   }
@@ -387,28 +454,33 @@ export default function App() {
     setIsProducing(true);
     setProduceError(null);
     try {
+      await ensureProjectSyncedOnServer(activeProject);
       const res = await fetch('/api/produce', {
         method: 'POST',
         headers: { 'x-user-id': currentUid },
         body: formData,
       });
-      const data = await res.json();
-      if (!res.ok) {
-        throw new Error(data.error || 'Error en la producción cinematográfica.');
-      }
-      const updatedProj = data.project as ProductionProject;
-      const newSeq = data.sequence as ProductionSequence;
+      const data = await parseApiResponse<{
+        project: ProductionProject;
+        sequence: ProductionSequence;
+      }>(res, 'Error en la producción cinematográfica.');
+      const updatedProj = data.project;
+      const newSeq = data.sequence;
       setProjects((prev) => {
         const next = prev.map((p) => (p.id === updatedProj.id ? updatedProj : p));
-        localStorage.setItem(userCacheKey, JSON.stringify(next));
+        persistProjectsCache(userCacheKey, next);
         return next;
       });
       setActiveSequenceId(newSeq.id);
       setActiveTab('vision');
 
       if (!skipCloudSync) {
-        await saveProjectToFirestore(currentUid, updatedProj);
-        await saveSequenceToFirestore(currentUid, updatedProj.id, newSeq);
+        try {
+          await saveProjectToFirestore(currentUid, updatedProj);
+          await saveSequenceToFirestore(currentUid, updatedProj.id, newSeq);
+        } catch (err) {
+          console.warn('No se pudo respaldar la secuencia en Firestore:', err);
+        }
       }
       return updatedProj;
     } catch (err) {
@@ -426,6 +498,7 @@ export default function App() {
     setFinalizingSeq(true);
     setProduceError(null);
     try {
+      await ensureProjectSyncedOnServer(activeProject);
       const res = await fetch(
         `/api/projects/${activeProject.id}/sequences/${activeSequence.id}/finalize`,
         {
@@ -433,30 +506,36 @@ export default function App() {
           headers: { 'x-user-id': currentUid },
         }
       );
-      const data = await res.json();
-      if (!res.ok) {
-        throw new Error(data.error || 'No se pudo aprobar la Versión Final.');
-      }
-      const updatedProj = data.project as ProductionProject;
-      const next = projects.map((p) => (p.id === updatedProj.id ? updatedProj : p));
-      setProjects(next);
-      localStorage.setItem(userCacheKey, JSON.stringify(next));
+      const data = await parseApiResponse<{
+        project: ProductionProject;
+        lessons?: LearningLesson[];
+      }>(res, 'No se pudo aprobar la Versión Final.');
+      const updatedProj = data.project;
+      setProjects((prev) => {
+        const next = prev.map((p) => (p.id === updatedProj.id ? updatedProj : p));
+        persistProjectsCache(userCacheKey, next);
+        return next;
+      });
       if (Array.isArray(data.lessons)) {
         setLessons(data.lessons);
       }
 
       if (!skipCloudSync) {
-        await finalizeSequenceInFirestore(currentUid, activeProject.id, activeSequence.id);
-        const autoLessons = extractAutomaticLessons(activeProject.title, {
-          ...activeSequence,
-          versionStatus: 'final',
-        });
-        for (let i = 0; i < autoLessons.length; i++) {
-          await addLessonToFirestore(currentUid, {
-            ...autoLessons[i],
-            id: `lesson-auto-${Date.now().toString(36)}-${i}`,
-            createdAt: new Date().toISOString(),
+        try {
+          await finalizeSequenceInFirestore(currentUid, activeProject.id, activeSequence.id);
+          const autoLessons = extractAutomaticLessons(activeProject.title, {
+            ...activeSequence,
+            versionStatus: 'final',
           });
+          for (let i = 0; i < autoLessons.length; i++) {
+            await addLessonToFirestore(currentUid, {
+              ...autoLessons[i],
+              id: `lesson-auto-${Date.now().toString(36)}-${i}`,
+              createdAt: new Date().toISOString(),
+            });
+          }
+        } catch (err) {
+          console.warn('Error sincronizando aprobación final en Firestore:', err);
         }
       }
     } catch (err) {
@@ -512,15 +591,19 @@ export default function App() {
       },
       body: JSON.stringify(payload),
     });
-    const data = await res.json();
-    if (!res.ok) {
-      throw new Error(data.error || 'No se pudo guardar la lección.');
-    }
+    const data = await parseApiResponse<{
+      lesson?: LearningLesson;
+      lessons?: LearningLesson[];
+    }>(res, 'No se pudo guardar la lección.');
     if (Array.isArray(data.lessons)) {
       setLessons(data.lessons);
     }
     if (data.lesson && !skipCloudSync) {
-      await addLessonToFirestore(currentUid, data.lesson as LearningLesson);
+      try {
+        await addLessonToFirestore(currentUid, data.lesson);
+      } catch (err) {
+        console.warn('Error guardando lección en Firestore:', err);
+      }
     }
   }
 
@@ -529,20 +612,26 @@ export default function App() {
       method: 'DELETE',
       headers: { 'x-user-id': currentUid },
     });
-    if (res.ok) {
-      const data = await res.json();
-      if (Array.isArray(data.lessons)) {
-        setLessons(data.lessons);
-      }
+    const data = await parseApiResponse<{ lessons?: LearningLesson[] }>(
+      res,
+      'No se pudo eliminar la lección.'
+    );
+    if (Array.isArray(data.lessons)) {
+      setLessons(data.lessons);
     }
     if (!skipCloudSync) {
-      await deleteLessonFromFirestore(currentUid, lessonId);
+      try {
+        await deleteLessonFromFirestore(currentUid, lessonId);
+      } catch (err) {
+        console.warn('Error eliminando lección en Firestore:', err);
+      }
     }
   }
 
   async function handleRateSequence(rating: number, note: string) {
     if (!activeProject || !activeSequence) return;
     setProduceError(null);
+    await ensureProjectSyncedOnServer(activeProject);
     const res = await fetch(
       `/api/projects/${activeProject.id}/sequences/${activeSequence.id}/rate`,
       {
@@ -554,34 +643,38 @@ export default function App() {
         body: JSON.stringify({ rating, note }),
       }
     );
-    const data = await res.json();
-    if (!res.ok) {
-      const msg = data.error || 'No se pudo registrar la evaluación de la secuencia.';
-      setProduceError(msg);
-      throw new Error(msg);
-    }
+    const data = await parseApiResponse<{
+      project?: ProductionProject;
+      lessons?: LearningLesson[];
+    }>(res, 'No se pudo registrar la evaluación de la secuencia.');
     if (data.project) {
-      const updatedProj = data.project as ProductionProject;
-      const next = projects.map((p) => (p.id === updatedProj.id ? updatedProj : p));
-      setProjects(next);
-      localStorage.setItem(userCacheKey, JSON.stringify(next));
+      const updatedProj = data.project;
+      setProjects((prev) => {
+        const next = prev.map((p) => (p.id === updatedProj.id ? updatedProj : p));
+        persistProjectsCache(userCacheKey, next);
+        return next;
+      });
     }
     if (Array.isArray(data.lessons)) {
       setLessons(data.lessons);
     }
     if (rating >= 4 && !skipCloudSync) {
-      const extracted = buildRatedChoiceLessons({
-        projectTitle: activeProject.title,
-        sequence: activeSequence,
-        rating,
-        note,
-      });
-      for (let i = 0; i < extracted.length; i++) {
-        await addLessonToFirestore(currentUid, {
-          ...extracted[i],
-          id: `lesson-rate-${Date.now().toString(36)}-${i}`,
-          createdAt: new Date().toISOString(),
+      try {
+        const extracted = buildRatedChoiceLessons({
+          projectTitle: activeProject.title,
+          sequence: activeSequence,
+          rating,
+          note,
         });
+        for (let i = 0; i < extracted.length; i++) {
+          await addLessonToFirestore(currentUid, {
+            ...extracted[i],
+            id: `lesson-rate-${Date.now().toString(36)}-${i}`,
+            createdAt: new Date().toISOString(),
+          });
+        }
+      } catch (err) {
+        console.warn('Error sincronizando lecciones en Firestore:', err);
       }
     }
   }
@@ -595,22 +688,129 @@ export default function App() {
     await handleSaveContinuity(nextBible);
   }
 
+  async function handleAddScreenplayNote(payload: {
+    beatKey: string;
+    sceneNumber: string;
+    beatIndex: number;
+    beatType: 'action' | 'dialogue' | 'camera' | 'sound';
+    lineExcerpt: string;
+    authorRole: ScreenplayNoteRole;
+    authorName: string;
+    note: string;
+  }) {
+    if (!activeProject || !activeSequence) return;
+    await ensureProjectSyncedOnServer(activeProject);
+    const res = await fetch(
+      `/api/projects/${activeProject.id}/sequences/${activeSequence.id}/notes`,
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-user-id': currentUid,
+        },
+        body: JSON.stringify(payload),
+      }
+    );
+    const data = await parseApiResponse<{
+      project: ProductionProject;
+      sequence: ProductionSequence;
+    }>(res, 'No se pudo guardar la nota al pie.');
+    setProjects((prev) => {
+      const next = prev.map((p) => (p.id === data.project.id ? data.project : p));
+      persistProjectsCache(userCacheKey, next);
+      return next;
+    });
+    if (!skipCloudSync && data.sequence.versionStatus === 'draft') {
+      try {
+        await saveSequenceToFirestore(currentUid, data.project.id, data.sequence);
+      } catch (err) {
+        console.warn('No se pudo sincronizar nota al pie en Firestore:', err);
+      }
+    }
+  }
+
+  async function handleToggleResolveScreenplayNote(noteId: string, resolved: boolean) {
+    if (!activeProject || !activeSequence) return;
+    await ensureProjectSyncedOnServer(activeProject);
+    const res = await fetch(
+      `/api/projects/${activeProject.id}/sequences/${activeSequence.id}/notes/${noteId}`,
+      {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-user-id': currentUid,
+        },
+        body: JSON.stringify({ resolved }),
+      }
+    );
+    const data = await parseApiResponse<{
+      project: ProductionProject;
+      sequence: ProductionSequence;
+    }>(res, 'No se pudo actualizar la nota al pie.');
+    setProjects((prev) => {
+      const next = prev.map((p) => (p.id === data.project.id ? data.project : p));
+      persistProjectsCache(userCacheKey, next);
+      return next;
+    });
+    if (!skipCloudSync && data.sequence.versionStatus === 'draft') {
+      try {
+        await saveSequenceToFirestore(currentUid, data.project.id, data.sequence);
+      } catch (err) {
+        console.warn('No se pudo sincronizar estado de nota en Firestore:', err);
+      }
+    }
+  }
+
+  async function handleDeleteScreenplayNote(noteId: string) {
+    if (!activeProject || !activeSequence) return;
+    await ensureProjectSyncedOnServer(activeProject);
+    const res = await fetch(
+      `/api/projects/${activeProject.id}/sequences/${activeSequence.id}/notes/${noteId}`,
+      {
+        method: 'DELETE',
+        headers: { 'x-user-id': currentUid },
+      }
+    );
+    const data = await parseApiResponse<{
+      project: ProductionProject;
+      sequence: ProductionSequence;
+    }>(res, 'No se pudo eliminar la nota al pie.');
+    setProjects((prev) => {
+      const next = prev.map((p) => (p.id === data.project.id ? data.project : p));
+      persistProjectsCache(userCacheKey, next);
+      return next;
+    });
+    if (!skipCloudSync && data.sequence.versionStatus === 'draft') {
+      try {
+        await saveSequenceToFirestore(currentUid, data.project.id, data.sequence);
+      } catch (err) {
+        console.warn('No se pudo eliminar nota en Firestore:', err);
+      }
+    }
+  }
+
   async function handleProjectMediaUpdated(updatedProj: ProductionProject) {
-    const next = projects.map((p) => (p.id === updatedProj.id ? updatedProj : p));
-    setProjects(next);
-    localStorage.setItem(userCacheKey, JSON.stringify(next));
+    setProjects((prev) => {
+      const next = prev.map((p) => (p.id === updatedProj.id ? updatedProj : p));
+      persistProjectsCache(userCacheKey, next);
+      return next;
+    });
 
     if (!skipCloudSync && activeSequence) {
       const updatedSeq = updatedProj.sequences.find((s) => s.id === activeSequence.id);
       if (updatedSeq && updatedSeq.versionStatus === 'draft') {
-        await saveSequenceToFirestore(currentUid, updatedProj.id, updatedSeq);
+        try {
+          await saveSequenceToFirestore(currentUid, updatedProj.id, updatedSeq);
+        } catch (err) {
+          console.warn('No se pudo sincronizar media de secuencia en Firestore:', err);
+        }
       }
     }
   }
 
   function handleProjectSeeded(seededProjects: ProductionProject[], seededId: string) {
     setProjects(seededProjects);
-    localStorage.setItem(userCacheKey, JSON.stringify(seededProjects));
+    persistProjectsCache(userCacheKey, seededProjects);
     const target = seededProjects.find((p) => p.id === seededId) || seededProjects[0];
     if (target) {
       setActiveProjectId(target.id);
@@ -619,219 +819,257 @@ export default function App() {
   }
 
   const userLabel = user.displayName || user.email?.split('@')[0] || 'Director';
+  const hideChromeForReading = activeTab === 'screenplay' && isReadingMode;
 
   return (
     <div className="h-screen flex flex-col overflow-hidden bg-[#0B0B0E] text-[#F2F0EB]">
-      <TopBar
-        activeTab={activeTab}
-        onTabChange={setActiveTab}
-        onOpenNewProject={() => setNewProjectOpen(true)}
-        onOpenAuth={() => setAuthOpen(true)}
-        onOpenAdminLab={() => setAdminLabOpen(true)}
-        isAdmin={isAdminSession}
-        userLabel={userLabel}
-        onToggleMobileMenu={() => setMobileMenuOpen(true)}
-      />
+      {!hideChromeForReading && (
+        <div className="no-print shrink-0">
+          <TopBar
+            activeTab={activeTab}
+            onTabChange={setActiveTab}
+            onOpenNewProject={() => setNewProjectOpen(true)}
+            onOpenAuth={() => setAuthOpen(true)}
+            onOpenAdminLab={() => setAdminLabOpen(true)}
+            isAdmin={isAdminSession}
+            userLabel={userLabel}
+            onToggleMobileMenu={() => setMobileMenuOpen(true)}
+          />
 
-      {/* Mobile Tab Bar */}
-      <nav
-        aria-label="Vistas móviles del estudio"
-        className="flex md:hidden items-center justify-between gap-1 px-2.5 py-1.5 border-b border-white/10 bg-[#101015] overflow-x-auto shrink-0"
-      >
-        {(
-          [
-            { id: 'vision', label: 'Dirección' },
-            { id: 'shots', label: 'Planos' },
-            { id: 'screenplay', label: 'Guion' },
-            { id: 'storyboard', label: 'Storyboard' },
-            { id: 'trailer', label: 'Tráiler 30s' },
-          ] as const
-        ).map((tab) => (
-          <button
-            key={tab.id}
-            type="button"
-            onClick={() => setActiveTab(tab.id)}
-            className={`px-2 py-1.5 rounded-md text-[11px] font-medium whitespace-nowrap shrink-0 ${
-              activeTab === tab.id
-                ? 'bg-[#E5A93C] text-[#0B0B0E]'
-                : 'text-[#9A968E] hover:text-[#F2F0EB]'
-            }`}
+          {/* Mobile Tab Bar */}
+          <nav
+            aria-label="Vistas móviles del estudio"
+            className="flex md:hidden items-center justify-between gap-1 px-2.5 py-1.5 border-b border-white/10 bg-[#101015] overflow-x-auto shrink-0"
           >
-            {tab.label}
-          </button>
-        ))}
-      </nav>
+            {(
+              [
+                { id: 'vision', label: 'Dirección' },
+                { id: 'shots', label: 'Planos' },
+                { id: 'screenplay', label: 'Guion' },
+                { id: 'storyboard', label: 'Storyboard' },
+                { id: 'previs3d', label: 'Pre-Vis 3D' },
+                { id: 'trailer', label: 'Tráiler 30s' },
+              ] as const
+            ).map((tab) => (
+              <button
+                key={tab.id}
+                type="button"
+                onClick={() => setActiveTab(tab.id)}
+                className={`px-2 py-1.5 rounded-md text-[11px] font-medium whitespace-nowrap shrink-0 ${
+                  activeTab === tab.id
+                    ? 'bg-[#E5A93C] text-[#0B0B0E]'
+                    : 'text-[#9A968E] hover:text-[#F2F0EB]'
+                }`}
+              >
+                {tab.label}
+              </button>
+            ))}
+          </nav>
+        </div>
+      )}
 
       <div className="flex-1 flex overflow-hidden">
-        <ProjectSidebar
-          projects={projects}
-          activeProjectId={activeProject?.id || ''}
-          searchQuery={searchQuery}
-          lessonsCount={lessons.length}
-          isAdmin={isAdminSession}
-          onSearchChange={setSearchQuery}
-          onSelectProject={handleSelectProject}
-          onOpenNewProject={() => setNewProjectOpen(true)}
-          onOpenAgentBlueprint={() => setBlueprintOpen(true)}
-          onOpenAdminLab={() => setAdminLabOpen(true)}
-          onOpenLearning={() => setLearningOpen(true)}
-          onOpenSettings={() => setSettingsOpen(true)}
-          mobileOpen={mobileMenuOpen}
-          onCloseMobile={() => setMobileMenuOpen(false)}
-        />
+        {!hideChromeForReading && (
+          <div className="no-print flex shrink-0">
+            <ProjectSidebar
+              projects={projects}
+              activeProjectId={activeProject?.id || ''}
+              searchQuery={searchQuery}
+              lessonsCount={lessons.length}
+              isAdmin={isAdminSession}
+              onSearchChange={setSearchQuery}
+              onSelectProject={handleSelectProject}
+              onOpenNewProject={() => setNewProjectOpen(true)}
+              onOpenAgentBlueprint={() => setBlueprintOpen(true)}
+              onOpenAdminLab={() => setAdminLabOpen(true)}
+              onOpenLearning={() => setLearningOpen(true)}
+              onOpenSettings={() => setSettingsOpen(true)}
+              mobileOpen={mobileMenuOpen}
+              onCloseMobile={() => setMobileMenuOpen(false)}
+            />
+          </div>
+        )}
 
         <main className="flex-1 flex flex-col overflow-hidden min-w-0">
-          {/* Active Project & Sequence Bar */}
-          {activeProject && (
-            <div className="border-b border-white/10 bg-[#101015] px-4 sm:px-5 py-3 flex flex-wrap items-center justify-between gap-3 shrink-0">
-              <div className="min-w-0 max-w-full">
-                <div className="flex flex-wrap items-center gap-2.5">
-                  <h1 className="font-display text-base sm:text-lg font-semibold text-[#F2F0EB] truncate">
-                    {activeProject.title}
-                  </h1>
-                  {activeSequence && (
-                    <span
-                      className={`text-[11px] font-mono-tech ${
-                        isFinalSequence ? 'text-[#38B2AC]' : 'text-[#E5A93C]'
-                      }`}
-                    >
-                      {isFinalSequence ? 'Versión Final' : 'Borrador'}
-                    </span>
-                  )}
-                </div>
-                <div className="text-xs text-[#8D8981] truncate">
-                  {activeProject.genreStyle}
-                </div>
-              </div>
-
-              <div className="flex flex-wrap items-center gap-2 w-full sm:w-auto">
-                {activeProject.sequences.length > 0 && (
-                  <div className="flex items-center gap-2 w-full sm:w-auto">
-                    <label htmlFor="active-sequence-select" className="sr-only">
-                      Secuencia activa
-                    </label>
-                    <select
-                      id="active-sequence-select"
-                      value={activeSequence?.id || ''}
-                      onChange={(e) => setActiveSequenceId(e.target.value)}
-                      className="w-full sm:w-auto sm:max-w-[220px] rounded-lg border border-white/12 bg-[#0B0B0E] px-3 py-1.5 text-xs text-[#F2F0EB] focus:border-[#E5A93C] focus:outline-none"
-                    >
-                      {activeProject.sequences.map((seq) => (
-                        <option key={seq.id} value={seq.id}>
-                          {seq.title} ({seq.versionStatus === 'final' ? 'Final' : 'Borrador'})
-                        </option>
-                      ))}
-                    </select>
+          {!hideChromeForReading && (
+            <>
+              {/* Active Project & Sequence Bar */}
+              {activeProject && (
+                <div className="no-print border-b border-white/10 bg-[#101015] px-4 sm:px-5 py-3 flex flex-wrap items-center justify-between gap-3 shrink-0">
+                  <div className="min-w-0 max-w-full">
+                    <div className="flex flex-wrap items-center gap-2.5">
+                      <h1 className="font-display text-base sm:text-lg font-semibold text-[#F2F0EB] truncate">
+                        {activeProject.title}
+                      </h1>
+                      {activeSequence && (
+                        <span
+                          className={`text-[11px] font-mono-tech ${
+                            isFinalSequence ? 'text-[#38B2AC]' : 'text-[#E5A93C]'
+                          }`}
+                        >
+                          {isFinalSequence ? 'Versión Final' : 'Borrador'}
+                        </span>
+                      )}
+                    </div>
+                    <div className="text-xs text-[#8D8981] truncate">
+                      {activeProject.genreStyle}
+                    </div>
                   </div>
-                )}
 
-                {activeSequence && !isFinalSequence && (
-                  <button
-                    type="button"
-                    onClick={handleApproveFinalVersion}
-                    disabled={finalizingSeq}
-                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-[#38B2AC]/45 bg-[#102625] hover:bg-[#163433] text-xs font-medium text-[#5EEAD4] whitespace-nowrap shrink-0 disabled:opacity-60"
-                  >
-                    <CheckCircle2 className="w-3.5 h-3.5" />
-                    <span>
-                      {finalizingSeq ? 'Aprobando...' : 'Aprobar Versión Final'}
-                    </span>
-                  </button>
-                )}
-
-                {activeSequence && (
-                  <button
-                    type="button"
-                    onClick={handleExportSequencePdf}
-                    disabled={!isFinalSequence || exportingPdf}
-                    title={
-                      isFinalSequence
-                        ? 'Exportar bitácora completa en PDF (guion, VFX e ilustraciones)'
-                        : 'Exportación bloqueada: aprueba primero la Versión Final'
-                    }
-                    className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-xs font-medium whitespace-nowrap shrink-0 transition-colors ${
-                      isFinalSequence
-                        ? 'border-[#E5A93C]/45 bg-[#1B1812] hover:bg-[#272116] text-[#F2F0EB]'
-                        : 'border-white/10 bg-[#121217] text-[#6E6A63] cursor-not-allowed'
-                    }`}
-                  >
-                    {isFinalSequence ? (
-                      <FileDown className="w-3.5 h-3.5 text-[#E5A93C]" />
-                    ) : (
-                      <Lock className="w-3.5 h-3.5 text-[#6E6A63]" />
+                  <div className="flex flex-wrap items-center gap-2 w-full sm:w-auto">
+                    {activeProject.sequences.length > 0 && (
+                      <div className="flex items-center gap-2 w-full sm:w-auto">
+                        <label htmlFor="active-sequence-select" className="sr-only">
+                          Secuencia activa
+                        </label>
+                        <select
+                          id="active-sequence-select"
+                          value={activeSequence?.id || ''}
+                          onChange={(e) => setActiveSequenceId(e.target.value)}
+                          className="w-full sm:w-auto sm:max-w-[220px] rounded-lg border border-white/12 bg-[#0B0B0E] px-3 py-1.5 text-xs text-[#F2F0EB] focus:border-[#E5A93C] focus:outline-none"
+                        >
+                          {activeProject.sequences.map((seq) => (
+                            <option key={seq.id} value={seq.id}>
+                              {seq.title} ({seq.versionStatus === 'final' ? 'Final' : 'Borrador'})
+                            </option>
+                          ))}
+                        </select>
+                      </div>
                     )}
-                    <span>
-                      {isFinalSequence ? 'Bitácora PDF' : 'PDF bloqueado (Borrador)'}
-                    </span>
-                  </button>
-                )}
 
-                {finalSequencesCount > 0 && (
-                  <button
-                    type="button"
-                    onClick={handleExportLibraryPdf}
-                    disabled={exportingPdf}
-                    title="Exportar biblioteca de todas las secuencias en Versión Final"
-                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-white/12 bg-[#16161E] hover:bg-[#1E1E29] text-xs font-medium text-[#E6E2DA] whitespace-nowrap shrink-0"
-                  >
-                    <Library className="w-3.5 h-3.5 text-[#E5A93C]" />
-                    <span>Biblioteca PDF</span>
-                  </button>
-                )}
+                    {activeSequence && !isFinalSequence && (
+                      <button
+                        type="button"
+                        onClick={handleApproveFinalVersion}
+                        disabled={finalizingSeq}
+                        className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-[#38B2AC]/45 bg-[#102625] hover:bg-[#163433] text-xs font-medium text-[#5EEAD4] whitespace-nowrap shrink-0 disabled:opacity-60"
+                      >
+                        <CheckCircle2 className="w-3.5 h-3.5" />
+                        <span>
+                          {finalizingSeq ? 'Aprobando...' : 'Aprobar Versión Final'}
+                        </span>
+                      </button>
+                    )}
 
-                <button
-                  type="button"
-                  onClick={() => setShowIngest((v) => !v)}
-                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-white/12 bg-[#16161E] hover:bg-[#1E1E29] text-xs font-medium text-[#E6E2DA] whitespace-nowrap shrink-0"
-                >
-                  {showIngest ? (
-                    <>
-                      <PanelLeftClose className="w-3.5 h-3.5 text-[#E5A93C]" />
-                      <span>Ocultar mesa</span>
-                    </>
-                  ) : (
-                    <>
-                      <PanelLeftOpen className="w-3.5 h-3.5 text-[#E5A93C]" />
-                      <span>Ingresar material</span>
-                    </>
-                  )}
-                </button>
-              </div>
-            </div>
-          )}
+                    {activeSequence && (
+                      <button
+                        type="button"
+                        onClick={handleExportSequencePdf}
+                        disabled={!isFinalSequence || exportingPdf}
+                        title={
+                          isFinalSequence
+                            ? 'Exportar bitácora completa en PDF (guion, VFX e ilustraciones)'
+                            : 'Exportación bloqueada: aprueba primero la Versión Final'
+                        }
+                        className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-xs font-medium whitespace-nowrap shrink-0 transition-colors ${
+                          isFinalSequence
+                            ? 'border-[#E5A93C]/45 bg-[#1B1812] hover:bg-[#272116] text-[#F2F0EB]'
+                            : 'border-white/10 bg-[#121217] text-[#6E6A63] cursor-not-allowed'
+                        }`}
+                      >
+                        {isFinalSequence ? (
+                          <FileDown className="w-3.5 h-3.5 text-[#E5A93C]" />
+                        ) : (
+                          <Lock className="w-3.5 h-3.5 text-[#6E6A63]" />
+                        )}
+                        <span>
+                          {isFinalSequence ? 'Bitácora PDF' : 'PDF bloqueado (Borrador)'}
+                        </span>
+                      </button>
+                    )}
 
-          {/* Horizontal Approved Sequences Timeline */}
-          {activeProject && (
-            <TimelineBar
-              project={activeProject}
-              activeSequenceId={activeSequence?.id || ''}
-              onSelectSequence={handleSelectTimelineSequence}
-            />
+                    {finalSequencesCount > 0 && (
+                      <button
+                        type="button"
+                        onClick={handleExportLibraryPdf}
+                        disabled={exportingPdf}
+                        title="Exportar biblioteca de todas las secuencias en Versión Final"
+                        className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-white/12 bg-[#16161E] hover:bg-[#1E1E29] text-xs font-medium text-[#E6E2DA] whitespace-nowrap shrink-0"
+                      >
+                        <Library className="w-3.5 h-3.5 text-[#E5A93C]" />
+                        <span>Biblioteca PDF</span>
+                      </button>
+                    )}
+
+                    <button
+                      type="button"
+                      onClick={() => setShowIngest((v) => !v)}
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-white/12 bg-[#16161E] hover:bg-[#1E1E29] text-xs font-medium text-[#E6E2DA] whitespace-nowrap shrink-0"
+                    >
+                      {showIngest ? (
+                        <>
+                          <PanelLeftClose className="w-3.5 h-3.5 text-[#E5A93C]" />
+                          <span>Ocultar mesa</span>
+                        </>
+                      ) : (
+                        <>
+                          <PanelLeftOpen className="w-3.5 h-3.5 text-[#E5A93C]" />
+                          <span>Ingresar material</span>
+                        </>
+                      )}
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {/* Horizontal Approved Sequences Timeline */}
+              {activeProject && (
+                <div className="no-print shrink-0">
+                  <TimelineBar
+                    project={activeProject}
+                    activeSequenceId={activeSequence?.id || ''}
+                    onSelectSequence={handleSelectTimelineSequence}
+                  />
+                </div>
+              )}
+
+              {/* Clear Step-by-Step Film Delivery Workflow Strip */}
+              <WorkflowStepperBar
+                activeProject={activeProject}
+                activeSequence={activeSequence}
+                activeTab={activeTab}
+                onSelectTab={setActiveTab}
+                onOpenNewProject={() => setNewProjectOpen(true)}
+                onOpenIngest={() => setShowIngest(true)}
+                onApproveFinal={handleApproveFinalVersion}
+                onOpenLiveVoice={() => setLiveVoiceOpen(true)}
+                finalizingSeq={finalizingSeq}
+              />
+            </>
           )}
 
           {/* Split Workspace: Ingest Drawer + Active View */}
           <div className="flex-1 flex flex-col xl:flex-row overflow-y-auto xl:overflow-hidden">
-            {activeProject && showIngest && (
-              <SourceIngestPanel
-                userId={currentUid}
-                project={activeProject}
-                studioSettings={studioSettings}
-                isProducing={isProducing}
-                errorMessage={produceError}
-                onDismissError={() => setProduceError(null)}
-                onSaveContinuity={handleSaveContinuity}
-                onProduce={handleProduce}
-                onAnalyzeAudioOnly={handleAnalyzeAudioOnly}
-                onAnalyzeChapters={handleAnalyzeChapters}
-              />
+            {!hideChromeForReading && activeProject && showIngest && (
+              <div className="no-print flex shrink-0">
+                <SourceIngestPanel
+                  userId={currentUid}
+                  project={activeProject}
+                  studioSettings={studioSettings}
+                  isProducing={isProducing}
+                  errorMessage={produceError}
+                  onDismissError={() => setProduceError(null)}
+                  onSaveContinuity={handleSaveContinuity}
+                  onProduce={handleProduce}
+                  onAnalyzeAudioOnly={handleAnalyzeAudioOnly}
+                  onAnalyzeChapters={handleAnalyzeChapters}
+                />
+              </div>
             )}
 
-            <div className="flex-1 xl:overflow-y-auto p-6 lg:p-8 min-w-0">
+            <div
+              className={`flex-1 min-w-0 ${
+                hideChromeForReading
+                  ? 'overflow-hidden flex flex-col'
+                  : 'xl:overflow-y-auto p-6 lg:p-8'
+              }`}
+            >
               {activeTab === 'trailer' && activeProject ? (
                 <TrailerView
                   userId={currentUid}
                   project={activeProject}
                   studioSettings={studioSettings}
+                  onEnsureProjectSynced={() => ensureProjectSyncedOnServer(activeProject)}
                   onProjectUpdated={handleProjectMediaUpdated}
                   onGoToVision={() => setActiveTab('vision')}
                 />
@@ -846,9 +1084,9 @@ export default function App() {
                     Dolby Atmos, voces en off realistas, VFX y guion completo.
                   </p>
                 </div>
-              ) : activeSequence ? (
+              ) : activeSequence && activeProject ? (
                 <>
-                  {activeTab === 'vision' && studioIntelligence && activeProject && (
+                  {activeTab === 'vision' && studioIntelligence && (
                     <VisionView
                       key={activeSequence.id}
                       sequence={activeSequence}
@@ -858,30 +1096,45 @@ export default function App() {
                       onApplyEnhancement={handleApplyEnhancement}
                     />
                   )}
-                  {activeTab === 'shots' && activeProject && (
+                  {activeTab === 'shots' && (
                     <ShotsAndSoundView
+                      key={activeSequence.id}
                       userId={currentUid}
                       projectId={activeProject.id}
                       sequence={activeSequence}
+                      onEnsureProjectSynced={() => ensureProjectSyncedOnServer(activeProject)}
                       onProjectMediaUpdated={handleProjectMediaUpdated}
                     />
                   )}
-                  {activeTab === 'screenplay' && activeProject && (
+                  {activeTab === 'screenplay' && (
                     <ScreenplayView
+                      key={activeSequence.id}
                       project={activeProject}
                       sequence={activeSequence}
+                      isReadingMode={isReadingMode}
+                      onToggleReadingMode={setIsReadingMode}
                       onExportSequencePdf={handleExportSequencePdf}
                       exportingPdf={exportingPdf}
+                      onAddNote={handleAddScreenplayNote}
+                      onToggleResolveNote={handleToggleResolveScreenplayNote}
+                      onDeleteNote={handleDeleteScreenplayNote}
                     />
                   )}
-                  {activeTab === 'storyboard' && activeProject && (
+                  {activeTab === 'storyboard' && (
                     <StoryboardView
                       key={activeSequence.id}
                       userId={currentUid}
                       projectId={activeProject.id}
                       sequence={activeSequence}
                       defaultResolution={studioSettings.defaultResolution}
+                      onEnsureProjectSynced={() => ensureProjectSyncedOnServer(activeProject)}
                       onProjectMediaUpdated={handleProjectMediaUpdated}
+                    />
+                  )}
+                  {activeTab === 'previs3d' && (
+                    <ThreeDPrevisView
+                      key={activeSequence.id}
+                      sequence={activeSequence}
                     />
                   )}
                 </>
@@ -989,6 +1242,14 @@ export default function App() {
         settings={studioSettings}
         onClose={() => setSettingsOpen(false)}
         onSaveSettings={handleSaveStudioSettings}
+      />
+
+      <LiveDirectorVoiceModal
+        open={liveVoiceOpen}
+        onClose={() => setLiveVoiceOpen(false)}
+        activeProject={activeProject}
+        activeSequence={activeSequence}
+        defaultVoicePreset={studioSettings.defaultVoicePreset}
       />
     </div>
   );

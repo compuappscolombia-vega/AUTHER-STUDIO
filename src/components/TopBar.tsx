@@ -17,6 +17,7 @@ const NAV_TABS: { id: WorkspaceTab; label: string }[] = [
   { id: 'shots', label: 'Planos y Sonido' },
   { id: 'screenplay', label: 'Guion' },
   { id: 'storyboard', label: 'Storyboard' },
+  { id: 'previs3d', label: 'Pre-Vis 3D' },
   { id: 'trailer', label: 'Tráiler 30s' },
 ];
 

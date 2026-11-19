@@ -173,6 +173,7 @@ export async function saveSequenceToFirestore(
       audioAnalysis: sequence.audioAnalysis || null,
       vfx: sequence.vfx,
       screenplay: sequence.screenplay,
+      screenplayNotes: sequence.screenplayNotes || [],
       storyboardFrames: sequence.storyboardFrames,
     });
 
@@ -320,6 +321,8 @@ export async function loadUserProjectsFromFirestore(
           audioAnalysis: (data.audioAnalysis as ProductionSequence['audioAnalysis']) || undefined,
           vfx: data.vfx as ProductionSequence['vfx'],
           screenplay: (data.screenplay as ProductionSequence['screenplay']) || [],
+          screenplayNotes:
+            (data.screenplayNotes as ProductionSequence['screenplayNotes']) || undefined,
           storyboardFrames:
             (data.storyboardFrames as ProductionSequence['storyboardFrames']) || [],
           continuitySummary: String(s.continuitySummary || ''),
@@ -414,7 +417,11 @@ export function subscribeLessonsFromFirestore(
       onLessons(items);
     },
     (error) => {
-      handleFirestoreError(error, OperationType.LIST, lessonPath);
+      try {
+        handleFirestoreError(error, OperationType.LIST, lessonPath);
+      } catch (formattedErr) {
+        console.error('Error en suscripción de lecciones Firestore:', formattedErr);
+      }
     }
   );
 }

@@ -61,8 +61,28 @@
 }
 
 @media print {
+  html,
   body {
     background: #ffffff !important;
     color: #111111 !important;
+    height: auto !important;
+    overflow: visible !important;
+  }
+
+  .no-print {
+    display: none !important;
+  }
+
+  .screenplay-print-sheet {
+    background: #ffffff !important;
+    color: #111111 !important;
+    border: none !important;
+    box-shadow: none !important;
+    padding: 0 !important;
+  }
+
+  .screenplay-print-sheet * {
+    color: #111111 !important;
+    border-color: #cccccc !important;
   }
 }

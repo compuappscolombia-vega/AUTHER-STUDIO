@@ -6,11 +6,13 @@ import type {
   VoiceOverTrack,
 } from '../types/studio';
 import { parseAspectRatio } from '../utils/studioLogic';
+import { parseApiResponse } from '../utils/apiClient';
 
 interface ShotsAndSoundViewProps {
   userId: string;
   projectId: string;
   sequence: ProductionSequence;
+  onEnsureProjectSynced: () => Promise<void>;
   onProjectMediaUpdated: (project: ProductionProject) => Promise<void>;
 }
 
@@ -18,16 +20,28 @@ export function ShotsAndSoundView({
   userId,
   projectId,
   sequence,
+  onEnsureProjectSynced,
   onProjectMediaUpdated,
 }: ShotsAndSoundViewProps) {
   const [selectedShotIdx, setSelectedShotIdx] = useState(0);
   const [generatingVoId, setGeneratingVoId] = useState<string | null>(null);
   const [voError, setVoError] = useState<string | null>(null);
 
+  const shotList = sequence.shotList || [];
+  const soundDesign = sequence.soundDesign || {
+    atmosLayers: [],
+    subBassCue: 'No especificado',
+    foleyDetails: [],
+    silenceBeats: 'No especificado',
+    musicalScore: 'No especificado',
+    tempoBpm: 80,
+  };
+
   async function handleGenerateVoiceOver(track: VoiceOverTrack) {
     setGeneratingVoId(track.id);
     setVoError(null);
     try {
+      await onEnsureProjectSynced();
       const res = await fetch('/api/generate-voiceover', {
         method: 'POST',
         headers: {
@@ -43,12 +57,12 @@ export function ShotsAndSoundView({
           deliveryDirection: track.deliveryDirection,
         }),
       });
-      const data = await res.json();
-      if (!res.ok) {
-        throw new Error(data.error || 'No se pudo sintetizar la voz en off.');
-      }
+      const data = await parseApiResponse<{ project?: ProductionProject }>(
+        res,
+        'No se pudo sintetizar la voz en off'
+      );
       if (data.project) {
-        await onProjectMediaUpdated(data.project as ProductionProject);
+        await onProjectMediaUpdated(data.project);
       }
     } catch (err) {
       setVoError(
@@ -60,10 +74,10 @@ export function ShotsAndSoundView({
   }
 
   const safeIdx =
-    selectedShotIdx >= 0 && selectedShotIdx < sequence.shotList.length
+    selectedShotIdx >= 0 && selectedShotIdx < shotList.length
       ? selectedShotIdx
       : 0;
-  const activeShot = sequence.shotList[safeIdx];
+  const activeShot = shotList[safeIdx];
   const ratioValue = parseAspectRatio(sequence.aspectRatio);
 
   // Compute inner framing box inside a 400x240 SVG viewport
@@ -92,7 +106,7 @@ export function ShotsAndSoundView({
             </h2>
           </div>
           <div className="text-xs font-mono-tech text-[#8D8981] tabular-nums">
-            {sequence.shotList.length} planos · Relación {sequence.aspectRatio}
+            {shotList.length} planos · Relación {sequence.aspectRatio}
           </div>
         </div>
 
@@ -236,7 +250,7 @@ export function ShotsAndSoundView({
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-white/5 text-xs">
-                  {sequence.shotList.map((shot, idx) => {
+                  {shotList.map((shot, idx) => {
                     const selected = idx === safeIdx;
                     return (
                       <tr
@@ -287,7 +301,7 @@ export function ShotsAndSoundView({
             </h2>
           </div>
           <div className="text-xs font-mono-tech text-[#8D8981] tabular-nums">
-            Dolby Atmos · {sequence.soundDesign.tempoBpm} BPM
+            Dolby Atmos · {soundDesign.tempoBpm} BPM
           </div>
         </div>
 
@@ -298,7 +312,7 @@ export function ShotsAndSoundView({
                 Capas Espaciales (Atmos)
               </div>
               <ul className="space-y-1.5 text-sm text-[#D4CFC7] list-disc pl-4">
-                {sequence.soundDesign.atmosLayers.map((layer, idx) => (
+                {(soundDesign.atmosLayers || []).map((layer, idx) => (
                   <li key={idx}>{layer}</li>
                 ))}
               </ul>
@@ -308,14 +322,14 @@ export function ShotsAndSoundView({
               <div className="text-xs font-medium text-[#C8C3BA] mb-1">
                 Diseño de Subgraves (LFE)
               </div>
-              <p className="text-sm text-[#EAE6DE]">{sequence.soundDesign.subBassCue}</p>
+              <p className="text-sm text-[#EAE6DE]">{soundDesign.subBassCue}</p>
             </div>
 
             <div className="pt-3 border-t border-white/5">
               <div className="text-xs font-medium text-[#C8C3BA] mb-1">
                 Uso Dramático del Silencio
               </div>
-              <p className="text-sm text-[#EAE6DE]">{sequence.soundDesign.silenceBeats}</p>
+              <p className="text-sm text-[#EAE6DE]">{soundDesign.silenceBeats}</p>
             </div>
           </div>
 
@@ -325,7 +339,7 @@ export function ShotsAndSoundView({
                 Foley Hiperrealista
               </div>
               <ul className="space-y-1.5 text-sm text-[#D4CFC7] list-disc pl-4">
-                {sequence.soundDesign.foleyDetails.map((item, idx) => (
+                {(soundDesign.foleyDetails || []).map((item, idx) => (
                   <li key={idx}>{item}</li>
                 ))}
               </ul>
@@ -333,10 +347,10 @@ export function ShotsAndSoundView({
 
             <div className="pt-3 border-t border-white/5">
               <div className="text-xs font-medium text-[#C8C3BA] mb-1">
-                Composición Musical ({sequence.soundDesign.tempoBpm} BPM)
+                Composición Musical ({soundDesign.tempoBpm} BPM)
               </div>
               <p className="text-sm text-[#EAE6DE] leading-relaxed">
-                {sequence.soundDesign.musicalScore}
+                {soundDesign.musicalScore}
               </p>
             </div>
           </div>

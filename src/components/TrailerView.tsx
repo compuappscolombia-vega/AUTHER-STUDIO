@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import {
   Check,
+  CheckCircle2,
   Clapperboard,
   Copy,
   Film,
@@ -29,11 +30,13 @@ import {
   formatTimecodeSec,
   validateTrailerReadiness,
 } from '../utils/productionPipeline';
+import { parseApiResponse } from '../utils/apiClient';
 
 interface TrailerViewProps {
   userId: string;
   project: ProductionProject;
   studioSettings: StudioSettings;
+  onEnsureProjectSynced: () => Promise<void>;
   onProjectUpdated: (project: ProductionProject) => Promise<void>;
   onGoToVision: () => void;
 }
@@ -42,11 +45,13 @@ export function TrailerView({
   userId,
   project,
   studioSettings,
+  onEnsureProjectSynced,
   onProjectUpdated,
   onGoToVision,
 }: TrailerViewProps) {
   const readiness = validateTrailerReadiness(project);
   const trailer: ProjectTrailer | undefined = project.trailer;
+  const firstDraftSequence = project.sequences.find((s) => s.versionStatus !== 'final');
 
   const [tone, setTone] = useState<string>(trailer?.tone || TRAILER_TONE_OPTIONS[0]);
   const [targetResolution, setTargetResolution] = useState<ResolutionTier>(
@@ -61,6 +66,7 @@ export function TrailerView({
   const [generatingMusic, setGeneratingMusic] = useState(false);
   const [busyBeatImgId, setBusyBeatImgId] = useState<string | null>(null);
   const [busyBeatVidId, setBusyBeatVidId] = useState<string | null>(null);
+  const [statusNotice, setStatusNotice] = useState<string | null>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [copiedDossier, setCopiedDossier] = useState(false);
 
@@ -73,7 +79,12 @@ export function TrailerView({
   useEffect(() => {
     setIsPlaying(false);
     setCurrentTimeSec(0);
-  }, [project.id, trailer?.id]);
+    setTone(trailer?.tone || TRAILER_TONE_OPTIONS[0]);
+    setTargetResolution(trailer?.targetResolution || studioSettings.defaultResolution);
+    setVoicePreset(trailer?.voicePreset || studioSettings.defaultVoicePreset);
+    setErrorMsg(null);
+    setStatusNotice(null);
+  }, [project.id, trailer?.id, studioSettings.defaultResolution, studioSettings.defaultVoicePreset]);
 
   useEffect(() => {
     if (!isPlaying) return;
@@ -137,11 +148,35 @@ export function TrailerView({
     }
   }
 
-  async function handleGenerateTrailer() {
+  async function pollVideoJobUntilDone(jobId: string): Promise<ProductionProject | null> {
+    for (let attempt = 0; attempt < 95; attempt++) {
+      await new Promise((resolve) => setTimeout(resolve, 2500));
+      const res = await fetch(`/api/video-jobs/${encodeURIComponent(jobId)}`, {
+        headers: { 'x-user-id': userId },
+      });
+      const data = await parseApiResponse<{
+        status: 'pending' | 'completed' | 'failed';
+        project?: ProductionProject;
+        error?: string;
+      }>(res, 'Error consultando el estado del clip de video');
+
+      if (data.status === 'completed') {
+        return data.project || null;
+      }
+      if (data.status === 'failed') {
+        throw new Error(data.error || 'Omni Flash no pudo generar el clip del tráiler.');
+      }
+    }
+    throw new Error('Tiempo de espera agotado generando el clip del tráiler.');
+  }
+
+  async function handleGenerateTrailer(autoApproveSequenceId?: string) {
     setGeneratingTrailer(true);
     setErrorMsg(null);
+    setStatusNotice(null);
     handleResetPlayback();
     try {
+      await onEnsureProjectSynced();
       const res = await fetch('/api/generate-trailer', {
         method: 'POST',
         headers: {
@@ -153,14 +188,18 @@ export function TrailerView({
           tone,
           targetResolution,
           voicePreset,
+          autoApproveSequenceId,
         }),
       });
-      const data = await res.json();
-      if (!res.ok) {
-        throw new Error(data.error || 'No se pudo diseñar el tráiler de 30 segundos.');
-      }
+      const data = await parseApiResponse<{ project?: ProductionProject }>(
+        res,
+        'No se pudo diseñar el tráiler de 30 segundos'
+      );
       if (data.project) {
-        await onProjectUpdated(data.project as ProductionProject);
+        await onProjectUpdated(data.project);
+        setStatusNotice(
+          'Guion y estructura de 6 cortes (00:00–00:30) generados. Ahora puedes sintetizar la Voz en Off, la Música Lyria y los clips Omni.'
+        );
       }
     } catch (err) {
       setErrorMsg(
@@ -175,7 +214,9 @@ export function TrailerView({
     if (!trailer) return;
     setGeneratingVoiceOver(true);
     setErrorMsg(null);
+    setStatusNotice(null);
     try {
+      await onEnsureProjectSynced();
       const res = await fetch('/api/generate-voiceover', {
         method: 'POST',
         headers: {
@@ -190,12 +231,13 @@ export function TrailerView({
           deliveryDirection: trailer.voiceDirection,
         }),
       });
-      const data = await res.json();
-      if (!res.ok) {
-        throw new Error(data.error || 'No se pudo sintetizar la voz en off del tráiler.');
-      }
+      const data = await parseApiResponse<{ project?: ProductionProject }>(
+        res,
+        'No se pudo sintetizar la voz en off del tráiler'
+      );
       if (data.project) {
-        await onProjectUpdated(data.project as ProductionProject);
+        await onProjectUpdated(data.project);
+        setStatusNotice('Pista de Voz en Off (WAV) generada y conectada al reproductor.');
       }
     } catch (err) {
       setErrorMsg(
@@ -210,7 +252,9 @@ export function TrailerView({
     if (!trailer) return;
     setGeneratingMusic(true);
     setErrorMsg(null);
+    setStatusNotice(null);
     try {
+      await onEnsureProjectSynced();
       const res = await fetch('/api/generate-trailer-music', {
         method: 'POST',
         headers: {
@@ -222,12 +266,13 @@ export function TrailerView({
           musicPrompt: trailer.musicPrompt,
         }),
       });
-      const data = await res.json();
-      if (!res.ok) {
-        throw new Error(data.error || 'No se pudo componer la música de 30s con Lyria.');
-      }
+      const data = await parseApiResponse<{ project?: ProductionProject }>(
+        res,
+        'No se pudo componer la música de 30s con Lyria'
+      );
       if (data.project) {
-        await onProjectUpdated(data.project as ProductionProject);
+        await onProjectUpdated(data.project);
+        setStatusNotice('Partitura musical de 30s (Lyria) compuesta y lista para proyectar.');
       }
     } catch (err) {
       setErrorMsg(
@@ -243,6 +288,7 @@ export function TrailerView({
     setBusyBeatImgId(beat.id);
     setErrorMsg(null);
     try {
+      await onEnsureProjectSynced();
       const res = await fetch('/api/generate-image', {
         method: 'POST',
         headers: {
@@ -257,12 +303,12 @@ export function TrailerView({
           resolution: trailer.targetResolution,
         }),
       });
-      const data = await res.json();
-      if (!res.ok) {
-        throw new Error(data.error || 'No se pudo generar el fotograma del tráiler.');
-      }
+      const data = await parseApiResponse<{ project?: ProductionProject }>(
+        res,
+        'No se pudo generar el fotograma del tráiler'
+      );
       if (data.project) {
-        await onProjectUpdated(data.project as ProductionProject);
+        await onProjectUpdated(data.project);
       }
     } catch (err) {
       setErrorMsg(
@@ -277,7 +323,9 @@ export function TrailerView({
     if (!trailer) return;
     setBusyBeatVidId(beat.id);
     setErrorMsg(null);
+    setStatusNotice(null);
     try {
+      await onEnsureProjectSynced();
       const clipSec = Math.min(10, Math.max(3, Math.round(beat.durationSec)));
       const res = await fetch('/api/generate-video', {
         method: 'POST',
@@ -292,14 +340,24 @@ export function TrailerView({
           aspectRatio: '16:9',
           duration: `${clipSec}s`,
           imageUrl: beat.imageUrl,
+          asyncJob: true,
         }),
       });
-      const data = await res.json();
-      if (!res.ok) {
-        throw new Error(data.error || 'No se pudo generar el clip con Omni Flash.');
+      const data = await parseApiResponse<{
+        status?: string;
+        jobId?: string;
+        project?: ProductionProject;
+      }>(res, 'No se pudo generar el clip con Omni Flash');
+
+      let finalProject: ProductionProject | null = data.project || null;
+      if (data.status === 'pending' && data.jobId) {
+        setStatusNotice(`Renderizando clip Beat ${beat.beatNumber} con Omni Flash (en progreso)...`);
+        finalProject = await pollVideoJobUntilDone(data.jobId);
       }
-      if (data.project) {
-        await onProjectUpdated(data.project as ProductionProject);
+
+      if (finalProject) {
+        await onProjectUpdated(finalProject);
+        setStatusNotice(`Clip del Beat ${beat.beatNumber} renderizado con éxito.`);
       }
     } catch (err) {
       setErrorMsg(
@@ -357,7 +415,7 @@ export function TrailerView({
               </h2>
             </div>
             <p className="text-xs text-[#8D8981] mt-1">
-              Ensambla un teaser oficial de 30 segundos cruzando la Biblia de Continuidad y únicamente las secuencias ya aprobadas en Versión Final.
+              Ensambla el teaser oficial de 30 segundos: primero diseña los 6 cortes y luego genera su Voz en Off WAV, Música Lyria y clips de video Omni Flash.
             </p>
           </div>
 
@@ -373,18 +431,35 @@ export function TrailerView({
         {!readiness.ready ? (
           <div className="p-6 rounded-xl border border-[#E5A93C]/30 bg-[#18150E] space-y-3">
             <div className="font-display text-base font-semibold text-[#F2F0EB]">
-              Se requiere al menos 1 secuencia aprobada (Versión Final)
+              Aún falta aprobar una secuencia en Versión Final
             </div>
             <p className="text-xs text-[#D4CFC7] leading-relaxed max-w-2xl">
-              {readiness.reason} Una vez aprobada en el encabezado superior («Aprobar Versión Final»), el Agente Director tomará su guion, óptica, luz, diseño sonoro y la Biblia de Continuidad para dirigir el tráiler de 30 segundos.
+              {readiness.reason} El Agente Director utiliza únicamente secuencias aprobadas para ensamblar el tráiler oficial de 30 segundos con fidelidad a la Biblia de Continuidad.
             </p>
-            <button
-              type="button"
-              onClick={onGoToVision}
-              className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg bg-[#E5A93C] hover:bg-[#EDA949] text-[#0B0B0E] text-xs font-semibold"
-            >
-              <span>Volver a Dirección de secuencia</span>
-            </button>
+            <div className="flex flex-wrap items-center gap-3">
+              {firstDraftSequence && (
+                <button
+                  type="button"
+                  onClick={() => void handleGenerateTrailer(firstDraftSequence.id)}
+                  disabled={generatingTrailer}
+                  className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg bg-[#E5A93C] hover:bg-[#EDA949] disabled:opacity-60 text-[#0B0B0E] text-xs font-semibold"
+                >
+                  <CheckCircle2 className="w-3.5 h-3.5" />
+                  <span>
+                    {generatingTrailer
+                      ? 'Aprobando y dirigiendo 30s...'
+                      : `Aprobar «${firstDraftSequence.title}» y Generar Tráiler 30s`}
+                  </span>
+                </button>
+              )}
+              <button
+                type="button"
+                onClick={onGoToVision}
+                className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg border border-white/15 bg-[#14141B] hover:bg-[#1E1E29] text-[#F2F0EB] text-xs font-medium"
+              >
+                <span>Ir a Dirección de secuencia</span>
+              </button>
+            </div>
           </div>
         ) : (
           <div className="p-4 rounded-xl border border-white/10 bg-[#131318] space-y-4">
@@ -473,7 +548,7 @@ export function TrailerView({
 
               <button
                 type="button"
-                onClick={handleGenerateTrailer}
+                onClick={() => void handleGenerateTrailer()}
                 disabled={generatingTrailer}
                 className="w-full inline-flex items-center justify-center gap-1.5 px-4 py-2 rounded-lg bg-[#E5A93C] hover:bg-[#EDA949] disabled:opacity-60 text-[#0B0B0E] text-xs font-semibold whitespace-nowrap"
               >
@@ -487,6 +562,20 @@ export function TrailerView({
                 </span>
               </button>
             </div>
+          </div>
+        )}
+
+        {statusNotice && (
+          <div className="rounded-lg border border-[#38B2AC]/35 bg-[#122625] px-4 py-3 text-xs text-[#A7F3D0] flex items-center justify-between gap-3">
+            <span>{statusNotice}</span>
+            <button
+              type="button"
+              onClick={() => setStatusNotice(null)}
+              aria-label="Cerrar aviso"
+              className="p-1 rounded hover:bg-white/10"
+            >
+              <X className="w-3.5 h-3.5" />
+            </button>
           </div>
         )}
 
@@ -561,7 +650,6 @@ export function TrailerView({
                 </div>
               )}
 
-              {/* Bottom Contrast Scrim for Subtitles & Title Card */}
               <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/90 via-black/60 to-transparent p-5 sm:p-6 pointer-events-none">
                 <div className="max-w-3xl space-y-1.5">
                   {activeBeat?.onScreenTitleCard && (

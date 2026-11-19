@@ -596,7 +596,18 @@ export function AdminAgentLabModal({
                         </div>
                         <button
                           type="button"
-                          onClick={() => void onDeleteLesson(lesson.id)}
+                          onClick={async () => {
+                            try {
+                              setError(null);
+                              await onDeleteLesson(lesson.id);
+                            } catch (err) {
+                              setError(
+                                err instanceof Error
+                                  ? err.message
+                                  : 'No se pudo eliminar la lección.'
+                              );
+                            }
+                          }}
                           aria-label={`Eliminar lección ${lesson.id}`}
                           className="p-1.5 rounded hover:bg-white/5 text-[#8D8981] hover:text-[#FCA5A5] shrink-0"
                         >

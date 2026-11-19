@@ -1,10 +1,12 @@
 import 'dotenv/config';
 import express from 'express';
 import fs from 'fs';
+import http from 'http';
 import path from 'path';
 import multer from 'multer';
 import { fileURLToPath } from 'url';
-import { GoogleGenAI, ThinkingLevel, Type } from '@google/genai';
+import { WebSocketServer, WebSocket } from 'ws';
+import { GoogleGenAI, Modality, ThinkingLevel, Type } from '@google/genai';
 import type {
   AgentDiagnosticReport,
   AdminAgentProfile,
@@ -18,6 +20,8 @@ import type {
   ProjectAsset,
   ProjectTrailer,
   ResolutionTier,
+  ScreenplayNote,
+  ScreenplayNoteRole,
   SourceMaterialType,
   StoryboardCard,
   VoiceOverTrack,
@@ -115,8 +119,17 @@ function writeProjectFolder(userId: string, project: ProductionProject): void {
 function ensureWorkspaceProjects(userId: string): ProductionProject[] {
   const root = getUserProjectsRoot(userId);
   fs.mkdirSync(root, { recursive: true });
-  const entries = fs.readdirSync(root, { withFileTypes: true });
-  const folders = entries.filter((e) => e.isDirectory());
+  let entries = fs.readdirSync(root, { withFileTypes: true });
+  let folders = entries.filter((e) => e.isDirectory());
+
+  if (userId === 'dev-preview-director' && folders.length === 0) {
+    const previewProjects = buildLocalPreviewFixture();
+    for (const proj of previewProjects) {
+      writeProjectFolder(userId, proj);
+    }
+    entries = fs.readdirSync(root, { withFileTypes: true });
+    folders = entries.filter((e) => e.isDirectory());
+  }
 
   const projects: ProductionProject[] = [];
   for (const folder of folders) {
@@ -223,6 +236,74 @@ function getGenAIClient(): GoogleGenAI {
       },
     },
   });
+}
+
+function classifyGeminiApiError(
+  error: unknown,
+  fallbackMessage: string
+): { status: number; message: string; isBillingOrPermission: boolean } {
+  const rawMessage = error instanceof Error ? error.message : String(error || fallbackMessage);
+  const statusProp =
+    typeof error === 'object' && error !== null && 'status' in error
+      ? Number((error as { status?: unknown }).status)
+      : NaN;
+
+  if (
+    statusProp === 403 ||
+    /PERMISSION_DENIED|PermissionDeniedError|billing account|outstanding balance|\b403\b/i.test(
+      rawMessage
+    )
+  ) {
+    return {
+      status: 403,
+      isBillingOrPermission: true,
+      message:
+        'Permiso denegado o facturación pendiente en Google Cloud (403 PERMISSION_DENIED). Verifica la cuenta de facturación o selecciona una clave API de pago activa en Settings > Secrets.',
+    };
+  }
+
+  if (statusProp === 429 || /RESOURCE_EXHAUSTED|\b429\b/i.test(rawMessage)) {
+    return {
+      status: 429,
+      isBillingOrPermission: true,
+      message:
+        'Se alcanzó el límite de cuota o se requiere una clave API con facturación activa (429 RESOURCE_EXHAUSTED). Verifica tu clave en Settings > Secrets.',
+    };
+  }
+
+  if (statusProp === 400 && /API_KEY_INVALID|API key not valid/i.test(rawMessage)) {
+    return {
+      status: 400,
+      isBillingOrPermission: false,
+      message:
+        'Clave GEMINI_API_KEY inválida (400 API_KEY_INVALID). Revisa la configuración en Settings > Secrets.',
+    };
+  }
+
+  if (statusProp === 404 || /NOT_FOUND/i.test(rawMessage)) {
+    return {
+      status: 404,
+      isBillingOrPermission: false,
+      message: rawMessage || 'Modelo o recurso no encontrado (404 NOT_FOUND).',
+    };
+  }
+
+  return {
+    status: 500,
+    isBillingOrPermission: false,
+    message: rawMessage || fallbackMessage,
+  };
+}
+
+function logClassifiedRouteError(
+  routeLabel: string,
+  classified: { status: number; message: string; isBillingOrPermission: boolean }
+): void {
+  if (classified.isBillingOrPermission || classified.status < 500) {
+    console.warn(`Aviso en ${routeLabel} (HTTP ${classified.status}):`, classified.message);
+  } else {
+    console.error(`Error en ${routeLabel}:`, classified.message);
+  }
 }
 
 function inferMimeType(filename: string, providedMime: string): string {
@@ -389,6 +470,72 @@ function normalizeVoicePreset(raw?: string): VoicePreset {
     return raw;
   }
   return 'Charon';
+}
+
+function safeParseModelJson<T = Record<string, unknown>>(
+  rawText: string,
+  errorLabel = 'La respuesta del modelo no tuvo formato JSON válido.'
+): T {
+  const stripped = rawText
+    .trim()
+    .replace(/^```(?:json)?\s*/i, '')
+    .replace(/\s*```$/i, '')
+    .trim();
+
+  try {
+    return JSON.parse(stripped) as T;
+  } catch {
+    const startObj = stripped.indexOf('{');
+    const endObj = stripped.lastIndexOf('}');
+    if (startObj !== -1 && endObj > startObj) {
+      try {
+        return JSON.parse(stripped.slice(startObj, endObj + 1)) as T;
+      } catch {
+        // fall through
+      }
+    }
+    throw new Error(errorLabel);
+  }
+}
+
+interface VideoJobState {
+  jobId: string;
+  userId: string;
+  projectId: string;
+  status: 'pending' | 'completed' | 'failed';
+  interactionId?: string;
+  videoUrl?: string;
+  project?: ProductionProject;
+  error?: string;
+  createdAt: number;
+}
+
+const videoJobs = new Map<string, VideoJobState>();
+
+function extractVideoPart(interaction: Record<string, unknown>): {
+  data?: string;
+  uri?: string;
+  mime_type?: string;
+} | null {
+  const direct = interaction.output_video as
+    | { data?: string; uri?: string; mime_type?: string }
+    | undefined;
+  if (direct && (direct.data || direct.uri)) {
+    return direct;
+  }
+  const outputs = interaction.outputs as Array<Record<string, unknown>> | undefined;
+  if (Array.isArray(outputs)) {
+    for (const item of outputs) {
+      if (item && item.type === 'video' && (item.data || item.uri)) {
+        return {
+          data: typeof item.data === 'string' ? item.data : undefined,
+          uri: typeof item.uri === 'string' ? item.uri : undefined,
+          mime_type: typeof item.mime_type === 'string' ? item.mime_type : undefined,
+        };
+      }
+    }
+  }
+  return null;
 }
 
 async function transcribeAudioWithGemini(
@@ -982,7 +1129,10 @@ Evalúa con rigor técnico de Hollywood:
       if (!raw) {
         throw new Error('El auditor del agente no devolvió diagnóstico.');
       }
-      const parsed = JSON.parse(raw) as Omit<AgentDiagnosticReport, 'localMetrics' | 'auditedAt'>;
+      const parsed = safeParseModelJson<Omit<AgentDiagnosticReport, 'localMetrics' | 'auditedAt'>>(
+        raw,
+        'El auditor del agente devolvió un JSON inválido.'
+      );
       const validCategories: LearningCategory[] = [
         'camera',
         'lighting',
@@ -1011,10 +1161,9 @@ Evalúa con rigor técnico de Hollywood:
 
       res.json({ report });
     } catch (error) {
-      const message =
-        error instanceof Error ? error.message : 'Error auditando la secuencia.';
-      console.error('Error en /api/admin/analyze-sequence:', error);
-      res.status(500).json({ error: message });
+      const classified = classifyGeminiApiError(error, 'Error auditando la secuencia.');
+      logClassifiedRouteError('/api/admin/analyze-sequence', classified);
+      res.status(classified.status).json({ error: classified.message });
     }
   });
 
@@ -1053,10 +1202,9 @@ Evalúa con rigor técnico de Hollywood:
       }
       res.json({ transcript });
     } catch (error) {
-      const message =
-        error instanceof Error ? error.message : 'Error transcribiendo el dictado de voz.';
-      console.error('Error en /api/transcribe-dictation:', error);
-      res.status(500).json({ error: message });
+      const classified = classifyGeminiApiError(error, 'Error transcribiendo el dictado de voz.');
+      logClassifiedRouteError('/api/transcribe-dictation', classified);
+      res.status(classified.status).json({ error: classified.message });
     }
   });
 
@@ -1065,6 +1213,67 @@ Evalúa con rigor técnico de Hollywood:
     const userId = getRequestUserId(req);
     const projects = ensureWorkspaceProjects(userId);
     res.json({ projects });
+  });
+
+  // Sync a client/cloud project snapshot onto workspace disk so media/trailer endpoints never 404
+  app.post('/api/projects/sync', (req, res) => {
+    const userId = getRequestUserId(req);
+    const incoming = req.body?.project as ProductionProject | undefined;
+    if (!incoming || !incoming.id || !incoming.title) {
+      res.status(400).json({ error: 'Se requiere un proyecto válido para sincronizar.' });
+      return;
+    }
+
+    const existing = readProjectById(userId, incoming.id);
+    if (!existing) {
+      const normalized: ProductionProject = {
+        ...incoming,
+        sequences: Array.isArray(incoming.sequences) ? incoming.sequences : [],
+        assets: Array.isArray(incoming.assets) ? incoming.assets : [],
+        updatedAt: incoming.updatedAt || new Date().toISOString(),
+      };
+      writeProjectFolder(userId, normalized);
+      res.json({ project: normalized, synced: true });
+      return;
+    }
+
+    // Merge sequences keeping server-rendered media assets while preserving screenplayNotes
+    const seqMap = new Map<string, ProductionSequence>();
+    for (const s of existing.sequences) {
+      seqMap.set(s.id, s);
+    }
+    for (const s of incoming.sequences || []) {
+      const prev = seqMap.get(s.id);
+      if (!prev) {
+        seqMap.set(s.id, s);
+      } else {
+        seqMap.set(s.id, {
+          ...s,
+          storyboardFrames:
+            prev.storyboardFrames.length > 0 &&
+            prev.storyboardFrames.some((f) => f.imageUrl || f.videoUrl) &&
+            !s.storyboardFrames.some((f) => f.imageUrl || f.videoUrl)
+              ? prev.storyboardFrames
+              : s.storyboardFrames,
+          screenplayNotes: s.screenplayNotes?.length
+            ? s.screenplayNotes
+            : prev.screenplayNotes,
+        });
+      }
+    }
+
+    const merged: ProductionProject = {
+      ...existing,
+      ...incoming,
+      sequences: Array.from(seqMap.values()),
+      trailer: incoming.trailer || existing.trailer,
+      assets:
+        (existing.assets?.length || 0) >= (incoming.assets?.length || 0)
+          ? existing.assets
+          : incoming.assets,
+    };
+    writeProjectFolder(userId, merged);
+    res.json({ project: merged, synced: true });
   });
 
   app.post('/api/projects', (req, res) => {
@@ -1181,6 +1390,152 @@ Evalúa con rigor técnico de Hollywood:
       sequence: finalizedSeq,
       lessons,
     });
+  });
+
+  // Screenplay Footnotes (Director / Producer Review Notes linked to a specific line)
+  app.post('/api/projects/:id/sequences/:seqId/notes', (req, res) => {
+    const userId = getRequestUserId(req);
+    const { id, seqId } = req.params;
+    const {
+      beatKey,
+      sceneNumber,
+      beatIndex,
+      beatType,
+      lineExcerpt,
+      authorRole,
+      authorName,
+      note,
+    } = req.body ?? {};
+
+    const cleanNote = String(note || '').trim();
+    const role: ScreenplayNoteRole = authorRole === 'producer' ? 'producer' : 'director';
+    if (cleanNote.length < 3 || cleanNote.length > 1200) {
+      res.status(400).json({ error: 'La nota al pie debe tener entre 3 y 1200 caracteres.' });
+      return;
+    }
+
+    const project = readProjectById(userId, id);
+    if (!project) {
+      res.status(404).json({ error: 'Proyecto no encontrado.' });
+      return;
+    }
+    const seqIdx = project.sequences.findIndex((s) => s.id === seqId);
+    if (seqIdx === -1) {
+      res.status(404).json({ error: 'Secuencia no encontrada.' });
+      return;
+    }
+
+    const seq = project.sequences[seqIdx];
+    const newNote: ScreenplayNote = {
+      id: `note-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`,
+      beatKey: String(beatKey || '0:0'),
+      sceneNumber: String(sceneNumber || '1'),
+      beatIndex: Number(beatIndex) || 0,
+      beatType:
+        beatType === 'dialogue' || beatType === 'camera' || beatType === 'sound'
+          ? beatType
+          : 'action',
+      lineExcerpt: String(lineExcerpt || '').slice(0, 140),
+      authorRole: role,
+      authorName:
+        String(authorName || '').trim() ||
+        (role === 'producer' ? 'Productor Ejecutivo' : 'Director'),
+      note: cleanNote,
+      createdAt: new Date().toISOString(),
+      resolved: false,
+    };
+
+    const nextSeq: ProductionSequence = {
+      ...seq,
+      screenplayNotes: [...(seq.screenplayNotes || []), newNote],
+      updatedAt: new Date().toISOString(),
+    };
+    const updatedProject: ProductionProject = {
+      ...project,
+      sequences: project.sequences.map((s, idx) => (idx === seqIdx ? nextSeq : s)),
+      updatedAt: new Date().toISOString(),
+    };
+    writeProjectFolder(userId, updatedProject);
+    res.status(201).json({ note: newNote, sequence: nextSeq, project: updatedProject });
+  });
+
+  app.patch('/api/projects/:id/sequences/:seqId/notes/:noteId', (req, res) => {
+    const userId = getRequestUserId(req);
+    const { id, seqId, noteId } = req.params;
+    const project = readProjectById(userId, id);
+    if (!project) {
+      res.status(404).json({ error: 'Proyecto no encontrado.' });
+      return;
+    }
+    const seqIdx = project.sequences.findIndex((s) => s.id === seqId);
+    if (seqIdx === -1) {
+      res.status(404).json({ error: 'Secuencia no encontrada.' });
+      return;
+    }
+
+    const seq = project.sequences[seqIdx];
+    const existingNotes = seq.screenplayNotes || [];
+    const targetNote = existingNotes.find((n) => n.id === noteId);
+    if (!targetNote) {
+      res.status(404).json({ error: 'Nota al pie no encontrada.' });
+      return;
+    }
+
+    const nextNotes = existingNotes.map((n) => {
+      if (n.id !== noteId) return n;
+      return {
+        ...n,
+        resolved:
+          typeof req.body?.resolved === 'boolean' ? req.body.resolved : n.resolved,
+        note:
+          typeof req.body?.note === 'string' && req.body.note.trim().length >= 3
+            ? req.body.note.trim().slice(0, 1200)
+            : n.note,
+      };
+    });
+
+    const nextSeq: ProductionSequence = {
+      ...seq,
+      screenplayNotes: nextNotes,
+      updatedAt: new Date().toISOString(),
+    };
+    const updatedProject: ProductionProject = {
+      ...project,
+      sequences: project.sequences.map((s, idx) => (idx === seqIdx ? nextSeq : s)),
+      updatedAt: new Date().toISOString(),
+    };
+    writeProjectFolder(userId, updatedProject);
+    res.json({ sequence: nextSeq, project: updatedProject });
+  });
+
+  app.delete('/api/projects/:id/sequences/:seqId/notes/:noteId', (req, res) => {
+    const userId = getRequestUserId(req);
+    const { id, seqId, noteId } = req.params;
+    const project = readProjectById(userId, id);
+    if (!project) {
+      res.status(404).json({ error: 'Proyecto no encontrado.' });
+      return;
+    }
+    const seqIdx = project.sequences.findIndex((s) => s.id === seqId);
+    if (seqIdx === -1) {
+      res.status(404).json({ error: 'Secuencia no encontrada.' });
+      return;
+    }
+
+    const seq = project.sequences[seqIdx];
+    const nextNotes = (seq.screenplayNotes || []).filter((n) => n.id !== noteId);
+    const nextSeq: ProductionSequence = {
+      ...seq,
+      screenplayNotes: nextNotes,
+      updatedAt: new Date().toISOString(),
+    };
+    const updatedProject: ProductionProject = {
+      ...project,
+      sequences: project.sequences.map((s, idx) => (idx === seqIdx ? nextSeq : s)),
+      updatedAt: new Date().toISOString(),
+    };
+    writeProjectFolder(userId, updatedProject);
+    res.json({ ok: true, sequence: nextSeq, project: updatedProject });
   });
 
   // Studio Intelligence: Rate a sequence's camera, lighting & soundscape outcomes (1-5)
@@ -1366,14 +1721,30 @@ Evalúa con rigor técnico de Hollywood:
         project,
       });
     } catch (error) {
-      const message =
-        error instanceof Error ? error.message : 'Error generando la imagen con Nano.';
-      console.error('Error en /api/generate-image:', error);
-      res.status(500).json({ error: message });
+      const classified = classifyGeminiApiError(error, 'Error generando la imagen con Nano.');
+      logClassifiedRouteError('/api/generate-image', classified);
+      res.status(classified.status).json({ error: classified.message });
     }
   });
 
-  // Omni Flash Video Generation (gemini-omni-1.2-flash via Interactions API)
+  // Poll background Omni Flash video job
+  app.get('/api/video-jobs/:jobId', (req, res) => {
+    const userId = getRequestUserId(req);
+    const job = videoJobs.get(req.params.jobId);
+    if (!job || job.userId !== userId) {
+      res.status(404).json({ error: 'Trabajo de video no encontrado.' });
+      return;
+    }
+    res.json({
+      jobId: job.jobId,
+      status: job.status,
+      videoUrl: job.videoUrl,
+      project: job.project,
+      error: job.error,
+    });
+  });
+
+  // Omni Flash Video Generation (gemini-omni-1.2-flash via Interactions API — background polling prevents proxy timeout)
   app.post('/api/generate-video', async (req, res) => {
     try {
       const userId = getRequestUserId(req);
@@ -1383,14 +1754,17 @@ Evalúa con rigor técnico de Hollywood:
         frameId,
         trailerBeatId,
         prompt,
+        title,
         aspectRatio,
         duration,
         imageUrl,
+        asyncJob,
       } = req.body ?? {};
       const pid = String(projectId || '').trim();
       const sid = String(sequenceId || '').trim();
       const fid = String(frameId || '').trim();
       const tbid = String(trailerBeatId || '').trim();
+      const clipTitle = String(title || '').trim();
       const motionPrompt = String(prompt || '').trim();
 
       if (!pid || !motionPrompt) {
@@ -1398,8 +1772,8 @@ Evalúa con rigor técnico de Hollywood:
         return;
       }
 
-      let project = readProjectById(userId, pid);
-      if (!project) {
+      const initialProject = readProjectById(userId, pid);
+      if (!initialProject) {
         res.status(404).json({ error: 'Proyecto no encontrado.' });
         return;
       }
@@ -1429,94 +1803,262 @@ Evalúa con rigor técnico de Hollywood:
           ]
         : motionPrompt;
 
-      const interaction = await ai.interactions.create(
-        {
-          model: 'gemini-omni-1.2-flash',
-          input: inputPayload,
-          background: false,
-          store: false,
-          stream: false,
-          response_format: {
-            type: 'video',
-            aspect_ratio: omniRatio,
-            duration: videoDuration,
-            resolution: '720p',
-          },
-        },
-        { timeout: 300000 }
-      );
-
-      const videoPart = interaction.output_video;
-      if (!videoPart || (!videoPart.data && !videoPart.uri)) {
-        throw new Error('Omni Flash no devolvió un archivo de video válido.');
-      }
-
-      let videoBuffer: Buffer;
-      let mimeType = videoPart.mime_type || 'video/mp4';
-
-      if (videoPart.data) {
-        videoBuffer = Buffer.from(videoPart.data, 'base64');
-      } else if (videoPart.uri) {
-        const fetched = await fetch(videoPart.uri);
-        if (!fetched.ok) {
-          throw new Error('No se pudo descargar el video generado por Omni Flash.');
+      async function finalizeVideoFromInteraction(
+        interactionRecord: Record<string, unknown>
+      ): Promise<{ videoUrl: string; project: ProductionProject }> {
+        const videoPart = extractVideoPart(interactionRecord);
+        if (!videoPart || (!videoPart.data && !videoPart.uri)) {
+          throw new Error('Omni Flash no devolvió un archivo de video válido.');
         }
-        mimeType = fetched.headers.get('content-type') || mimeType;
-        videoBuffer = Buffer.from(await fetched.arrayBuffer());
-      } else {
-        throw new Error('Respuesta de video vacía.');
-      }
 
-      const saved = saveGeneratedAssetBuffer(userId, project, {
-        baseName: `omniflash-${tbid || fid || 'clip'}`,
-        ext: '.mp4',
-        mimeType,
-        buffer: videoBuffer,
-        kind: 'video',
-      });
-      project = saved.updatedProject;
+        let videoBuffer: Buffer;
+        let mimeType = videoPart.mime_type || 'video/mp4';
 
-      if (sid && fid) {
-        const seqIdx = project.sequences.findIndex((s) => s.id === sid);
-        if (seqIdx !== -1) {
-          const seq = project.sequences[seqIdx];
-          const updatedFrames = seq.storyboardFrames.map((fr) =>
-            fr.id === fid ? { ...fr, videoUrl: saved.asset.url } : fr
-          );
-          project = {
-            ...project,
-            sequences: project.sequences.map((s, idx) =>
-              idx === seqIdx
-                ? { ...s, storyboardFrames: updatedFrames, updatedAt: new Date().toISOString() }
-                : s
-            ),
+        if (videoPart.data) {
+          videoBuffer = Buffer.from(videoPart.data, 'base64');
+        } else if (videoPart.uri) {
+          const isGoogleUri =
+            videoPart.uri.includes('googleapis.com') ||
+            videoPart.uri.includes('generativelanguage');
+          const fetched = await fetch(videoPart.uri, {
+            headers: isGoogleUri
+              ? { 'x-goog-api-key': process.env.GEMINI_API_KEY || '' }
+              : undefined,
+          });
+          if (!fetched.ok) {
+            throw new Error(
+              `No se pudo descargar el video generado por Omni Flash (${fetched.status}).`
+            );
+          }
+          mimeType = fetched.headers.get('content-type') || mimeType;
+          videoBuffer = Buffer.from(await fetched.arrayBuffer());
+        } else {
+          throw new Error('Respuesta de video vacía.');
+        }
+
+        let latestProject = readProjectById(userId, pid) || initialProject!;
+        const saved = saveGeneratedAssetBuffer(userId, latestProject, {
+          baseName: `omniflash-${tbid || fid || 'clip'}`,
+          ext: '.mp4',
+          mimeType,
+          buffer: videoBuffer,
+          kind: 'video',
+        });
+        latestProject = saved.updatedProject;
+
+        if (sid && fid) {
+          const seqIdx = latestProject.sequences.findIndex((s) => s.id === sid);
+          if (seqIdx !== -1) {
+            const seq = latestProject.sequences[seqIdx];
+            const updatedFrames = seq.storyboardFrames.map((fr) =>
+              fr.id === fid ? { ...fr, videoUrl: saved.asset.url } : fr
+            );
+            latestProject = {
+              ...latestProject,
+              sequences: latestProject.sequences.map((s, idx) =>
+                idx === seqIdx
+                  ? { ...s, storyboardFrames: updatedFrames, updatedAt: new Date().toISOString() }
+                  : s
+              ),
+              updatedAt: new Date().toISOString(),
+            };
+            writeProjectFolder(userId, latestProject);
+          }
+        } else if (sid && !fid && !tbid) {
+          // Standalone Text-to-Video clip attached directly to active sequence storyboard
+          const seqIdx = latestProject.sequences.findIndex((s) => s.id === sid);
+          if (seqIdx !== -1) {
+            const seq = latestProject.sequences[seqIdx];
+            const newCard: StoryboardCard = {
+              id: `sb-clip-${Date.now().toString(36)}`,
+              title: clipTitle || `Clip Omni Flash (${omniRatio} · ${videoDuration})`,
+              shotRef: `Clip ${seq.storyboardFrames.length + 1}`,
+              aspectRatio: omniRatio,
+              cameraSpec: `${seq.cameraSystem} · ${videoDuration} · ${omniRatio}`,
+              videoUrl: saved.asset.url,
+              visualPrompt: motionPrompt,
+              veoMotionPrompt: motionPrompt,
+            };
+            latestProject = {
+              ...latestProject,
+              sequences: latestProject.sequences.map((s, idx) =>
+                idx === seqIdx
+                  ? {
+                      ...s,
+                      storyboardFrames: [newCard, ...s.storyboardFrames],
+                      updatedAt: new Date().toISOString(),
+                    }
+                  : s
+              ),
+              updatedAt: new Date().toISOString(),
+            };
+            writeProjectFolder(userId, latestProject);
+          }
+        } else if (tbid && latestProject.trailer) {
+          latestProject = {
+            ...latestProject,
+            trailer: {
+              ...latestProject.trailer,
+              beats: latestProject.trailer.beats.map((b) =>
+                b.id === tbid ? { ...b, videoUrl: saved.asset.url } : b
+              ),
+            },
+            updatedAt: new Date().toISOString(),
           };
-          writeProjectFolder(userId, project);
+          writeProjectFolder(userId, latestProject);
         }
-      } else if (tbid && project.trailer) {
-        project = {
-          ...project,
-          trailer: {
-            ...project.trailer,
-            beats: project.trailer.beats.map((b) =>
-              b.id === tbid ? { ...b, videoUrl: saved.asset.url } : b
-            ),
-          },
-          updatedAt: new Date().toISOString(),
-        };
-        writeProjectFolder(userId, project);
+
+        return { videoUrl: saved.asset.url, project: latestProject };
       }
 
-      res.json({
-        videoUrl: saved.asset.url,
+      if (asyncJob === false) {
+        const interaction = await ai.interactions.create(
+          {
+            model: 'gemini-omni-1.2-flash',
+            input: inputPayload,
+            background: false,
+            store: false,
+            stream: false,
+            response_format: {
+              type: 'video',
+              aspect_ratio: omniRatio,
+              duration: videoDuration,
+              resolution: '720p',
+            },
+          },
+          { timeout: 300000 }
+        );
+
+        const done = await finalizeVideoFromInteraction(
+          interaction as unknown as Record<string, unknown>
+        );
+        res.json({
+          status: 'completed',
+          videoUrl: done.videoUrl,
+          model: 'gemini-omni-1.2-flash',
+          project: done.project,
+        });
+        return;
+      }
+
+      // Async background interaction so Cloud Run / proxy never hits 60s HTTP timeout
+      const interaction = await ai.interactions.create({
         model: 'gemini-omni-1.2-flash',
-        project,
+        input: inputPayload,
+        background: true,
+        store: true,
+        response_format: {
+          type: 'video',
+          aspect_ratio: omniRatio,
+          duration: videoDuration,
+          resolution: '720p',
+        },
+      });
+
+      const interactionObj = interaction as unknown as Record<string, unknown>;
+      if (interaction.status === 'completed' && extractVideoPart(interactionObj)) {
+        const done = await finalizeVideoFromInteraction(interactionObj);
+        res.json({
+          status: 'completed',
+          videoUrl: done.videoUrl,
+          model: 'gemini-omni-1.2-flash',
+          project: done.project,
+        });
+        return;
+      }
+
+      if (
+        interaction.status === 'failed' ||
+        interaction.status === 'cancelled' ||
+        interaction.status === 'budget_exceeded'
+      ) {
+        const firstErr = interaction.errors?.[0]?.message;
+        throw new Error(firstErr || `Omni Flash devolvió estado ${interaction.status}.`);
+      }
+
+      const jobId = `vjob-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
+      const jobRecord: VideoJobState = {
+        jobId,
+        userId,
+        projectId: pid,
+        status: 'pending',
+        interactionId: interaction.id,
+        createdAt: Date.now(),
+      };
+      videoJobs.set(jobId, jobRecord);
+
+      void (async () => {
+        const maxAttempts = 100; // up to ~5 minutes at 3s intervals
+        for (let attempt = 0; attempt < maxAttempts; attempt++) {
+          await new Promise((resolve) => setTimeout(resolve, 3000));
+          try {
+            const latest = await ai.interactions.get(interaction.id);
+            if (latest.status === 'completed') {
+              const done = await finalizeVideoFromInteraction(
+                latest as unknown as Record<string, unknown>
+              );
+              videoJobs.set(jobId, {
+                ...jobRecord,
+                status: 'completed',
+                videoUrl: done.videoUrl,
+                project: done.project,
+              });
+              return;
+            }
+            if (
+              latest.status === 'failed' ||
+              latest.status === 'cancelled' ||
+              latest.status === 'incomplete' ||
+              latest.status === 'budget_exceeded'
+            ) {
+              const rawErrMsg =
+                latest.errors?.[0]?.message ||
+                `La generación de video finalizó con estado: ${latest.status}`;
+              const classifiedLatest = classifyGeminiApiError(rawErrMsg, rawErrMsg);
+              videoJobs.set(jobId, {
+                ...jobRecord,
+                status: 'failed',
+                error: classifiedLatest.message,
+              });
+              return;
+            }
+          } catch (pollErr) {
+            const classifiedPoll = classifyGeminiApiError(
+              pollErr,
+              'Error consultando el progreso de Omni Flash.'
+            );
+            if (
+              classifiedPoll.isBillingOrPermission ||
+              classifiedPoll.status === 400 ||
+              classifiedPoll.status === 404 ||
+              attempt >= maxAttempts - 1
+            ) {
+              videoJobs.set(jobId, {
+                ...jobRecord,
+                status: 'failed',
+                error: classifiedPoll.message,
+              });
+              return;
+            }
+          }
+        }
+        videoJobs.set(jobId, {
+          ...jobRecord,
+          status: 'failed',
+          error: 'Tiempo máximo de espera superado generando video en Omni Flash.',
+        });
+      })();
+
+      res.status(202).json({
+        jobId,
+        status: 'pending',
+        interactionId: interaction.id,
+        model: 'gemini-omni-1.2-flash',
       });
     } catch (error) {
-      const message =
-        error instanceof Error ? error.message : 'Error generando el video con Omni Flash.';
-      console.error('Error en /api/generate-video:', error);
-      res.status(500).json({ error: message });
+      const classified = classifyGeminiApiError(error, 'Error generando el video con Omni Flash.');
+      logClassifiedRouteError('/api/generate-video', classified);
+      res.status(classified.status).json({ error: classified.message });
     }
   });
 
@@ -1641,17 +2183,19 @@ Genera un informe profesional en español que capture:
 
       const raw = (response.text ?? '').trim();
       if (!raw) throw new Error('No se recibió análisis de audio del modelo.');
-      const report = JSON.parse(raw) as AudioAnalysisReport;
+      const report = safeParseModelJson<AudioAnalysisReport>(
+        raw,
+        'El análisis de audio devolvió un JSON inválido.'
+      );
       if (!report.transcription && verbatimTranscript) {
         report.transcription = verbatimTranscript;
       }
 
       res.json({ report, project: activeProject });
     } catch (error) {
-      const message =
-        error instanceof Error ? error.message : 'Error analizando el archivo de audio.';
-      console.error('Error en /api/analyze-audio:', error);
-      res.status(500).json({ error: message });
+      const classified = classifyGeminiApiError(error, 'Error analizando el archivo de audio.');
+      logClassifiedRouteError('/api/analyze-audio', classified);
+      res.status(classified.status).json({ error: classified.message });
     }
   });
 
@@ -1738,7 +2282,7 @@ Devuelve entre 2 y 12 capítulos ordenados cronológicamente (index: 1, 2, 3...)
         throw new Error('No se pudo extraer la estructura de capítulos.');
       }
 
-      const parsed = JSON.parse(raw) as {
+      const parsed = safeParseModelJson<{
         chapters?: Array<{
           index: number;
           title: string;
@@ -1747,7 +2291,7 @@ Devuelve entre 2 y 12 capítulos ordenados cronológicamente (index: 1, 2, 3...)
           estimatedStartHint: string;
           sourceExcerpt: string;
         }>;
-      };
+      }>(raw, 'La estructura de capítulos no devolvió JSON válido.');
 
       const rawList = Array.isArray(parsed.chapters) ? parsed.chapters : [];
       if (rawList.length === 0) {
@@ -1783,10 +2327,12 @@ Devuelve entre 2 y 12 capítulos ordenados cronológicamente (index: 1, 2, 3...)
 
       res.json({ project: updatedProject, chapterPlan });
     } catch (error) {
-      const message =
-        error instanceof Error ? error.message : 'Error analizando los capítulos del material.';
-      console.error('Error en /api/analyze-chapters:', error);
-      res.status(500).json({ error: message });
+      const classified = classifyGeminiApiError(
+        error,
+        'Error analizando los capítulos del material.'
+      );
+      logClassifiedRouteError('/api/analyze-chapters', classified);
+      res.status(classified.status).json({ error: classified.message });
     }
   });
 
@@ -1961,7 +2507,10 @@ Genera el expediente completo de dirección en JSON estructurado siguiendo el es
         throw new Error('El motor cinematográfico devolvió una respuesta vacía.');
       }
 
-      const parsed = JSON.parse(rawJson);
+      const parsed = safeParseModelJson<Record<string, any>>(
+        rawJson,
+        'El motor cinematográfico devolvió una estructura JSON incompleta.'
+      );
 
       const audioAnalysis: AudioAnalysisReport | undefined = isAudioUpload
         ? parsed.audioAnalysis || {
@@ -2061,10 +2610,9 @@ Genera el expediente completo de dirección en JSON estructurado siguiendo el es
         sequence: createdSequence,
       });
     } catch (error) {
-      const message =
-        error instanceof Error ? error.message : 'Error inesperado al producir la secuencia.';
-      console.error('Error en /api/produce:', error);
-      res.status(500).json({ error: message });
+      const classified = classifyGeminiApiError(error, 'Error inesperado al producir la secuencia.');
+      logClassifiedRouteError('/api/produce', classified);
+      res.status(classified.status).json({ error: classified.message });
     }
   });
 
@@ -2172,10 +2720,9 @@ Genera el expediente completo de dirección en JSON estructurado siguiendo el es
         project,
       });
     } catch (error) {
-      const message =
-        error instanceof Error ? error.message : 'Error generando la voz en off realista.';
-      console.error('Error en /api/generate-voiceover:', error);
-      res.status(500).json({ error: message });
+      const classified = classifyGeminiApiError(error, 'Error generando la voz en off realista.');
+      logClassifiedRouteError('/api/generate-voiceover', classified);
+      res.status(classified.status).json({ error: classified.message });
     }
   });
 
@@ -2183,22 +2730,55 @@ Genera el expediente completo de dirección en JSON estructurado siguiendo el es
   app.post('/api/generate-trailer', async (req, res) => {
     try {
       const userId = getRequestUserId(req);
-      const { projectId, tone, targetResolution, voicePreset } = req.body ?? {};
+      const {
+        projectId,
+        tone,
+        targetResolution,
+        voicePreset,
+        autoApproveSequenceId,
+      } = req.body ?? {};
       const pid = String(projectId || '').trim();
       if (!pid) {
         res.status(400).json({ error: 'Falta el identificador del proyecto.' });
         return;
       }
 
-      const project = readProjectById(userId, pid);
+      let project = readProjectById(userId, pid);
       if (!project) {
         res.status(404).json({ error: 'Proyecto no encontrado.' });
         return;
       }
 
-      const approvedSequences = project.sequences.filter(
+      let approvedSequences = project.sequences.filter(
         (seq) => seq.versionStatus === 'final'
       );
+
+      // Optional 1-click auto-approve when user initiates trailer directly from a draft sequence
+      if (
+        approvedSequences.length === 0 &&
+        typeof autoApproveSequenceId === 'string' &&
+        autoApproveSequenceId.trim()
+      ) {
+        const targetId = autoApproveSequenceId.trim();
+        const targetIdx = project.sequences.findIndex((s) => s.id === targetId);
+        if (targetIdx !== -1) {
+          const finalizedSeq: ProductionSequence = {
+            ...project.sequences[targetIdx],
+            versionStatus: 'final',
+            updatedAt: new Date().toISOString(),
+          };
+          project = {
+            ...project,
+            sequences: project.sequences.map((s, idx) =>
+              idx === targetIdx ? finalizedSeq : s
+            ),
+            updatedAt: new Date().toISOString(),
+          };
+          writeProjectFolder(userId, project);
+          approvedSequences = [finalizedSeq];
+        }
+      }
+
       if (approvedSequences.length === 0) {
         res.status(400).json({
           error:
@@ -2268,7 +2848,10 @@ INSTRUCCIONES DE MONTAJE DE 30 SEGUNDOS:
       if (!raw) {
         throw new Error('El Agente Director no devolvió el diseño del tráiler.');
       }
-      const parsed = JSON.parse(raw);
+      const parsed = safeParseModelJson<Record<string, any>>(
+        raw,
+        'El Agente Director devolvió una estructura de tráiler inválida.'
+      );
 
       const normalizedBeats = normalizeTrailerBeats(
         Array.isArray(parsed.beats) ? parsed.beats : [],
@@ -2305,10 +2888,12 @@ INSTRUCCIONES DE MONTAJE DE 30 SEGUNDOS:
 
       res.json({ trailer, project: updatedProject });
     } catch (error) {
-      const message =
-        error instanceof Error ? error.message : 'Error generando el tráiler cinematográfico.';
-      console.error('Error en /api/generate-trailer:', error);
-      res.status(500).json({ error: message });
+      const classified = classifyGeminiApiError(
+        error,
+        'Error generando el tráiler cinematográfico.'
+      );
+      logClassifiedRouteError('/api/generate-trailer', classified);
+      res.status(classified.status).json({ error: classified.message });
     }
   });
 
@@ -2339,6 +2924,9 @@ INSTRUCCIONES DE MONTAJE DE 30 SEGUNDOS:
       const responseStream = await ai.models.generateContentStream({
         model: 'lyria-3-clip-preview',
         contents: prompt,
+        config: {
+          responseModalities: [Modality.AUDIO],
+        },
       });
 
       const audioChunks: Buffer[] = [];
@@ -2383,10 +2971,9 @@ INSTRUCCIONES DE MONTAJE DE 30 SEGUNDOS:
 
       res.json({ audioUrl: saved.asset.url, project });
     } catch (error) {
-      const message =
-        error instanceof Error ? error.message : 'Error generando música de 30s con Lyria.';
-      console.error('Error en /api/generate-trailer-music:', error);
-      res.status(500).json({ error: message });
+      const classified = classifyGeminiApiError(error, 'Error generando música de 30s con Lyria.');
+      logClassifiedRouteError('/api/generate-trailer-music', classified);
+      res.status(classified.status).json({ error: classified.message });
     }
   });
 
@@ -2495,7 +3082,10 @@ REQUISITOS OBLIGATORIOS PARA LOS 4 FRAMES:
         throw new Error('El Agente Director no devolvió los 4 frames de storyboard.');
       }
 
-      const parsed = JSON.parse(raw) as { frames?: Array<Partial<StoryboardCard>> };
+      const parsed = safeParseModelJson<{ frames?: Array<Partial<StoryboardCard>> }>(
+        raw,
+        'El Agente Director devolvió una lista de storyboard inválida.'
+      );
       const normalizedFrames = normalizeFourKeyStoryboardFrames(
         Array.isArray(parsed.frames) ? parsed.frames : [],
         {
@@ -2559,9 +3149,17 @@ REQUISITOS OBLIGATORIOS PARA LOS 4 FRAMES:
               finalFrames.push(frame);
             }
           } catch (imgErr) {
-            const msg = imgErr instanceof Error ? imgErr.message : 'Error de renderizado Nano';
-            imageWarnings.push(`${frame.title}: ${msg}`);
+            const classifiedImg = classifyGeminiApiError(imgErr, 'Error de renderizado Nano');
+            imageWarnings.push(`${frame.title}: ${classifiedImg.message}`);
             finalFrames.push(frame);
+            if (classifiedImg.isBillingOrPermission) {
+              // Avoid repeating 3 more doomed calls when API key/billing is blocked
+              const currentIndex = normalizedFrames.indexOf(frame);
+              for (const remaining of normalizedFrames.slice(currentIndex + 1)) {
+                finalFrames.push(remaining);
+              }
+              break;
+            }
           }
         }
         normalizedFrames.splice(0, normalizedFrames.length, ...finalFrames);
@@ -2589,12 +3187,12 @@ REQUISITOS OBLIGATORIOS PARA LOS 4 FRAMES:
         imageWarnings,
       });
     } catch (error) {
-      const message =
-        error instanceof Error
-          ? error.message
-          : 'Error auto-generando los 4 frames de storyboard.';
-      console.error('Error en /api/generate-storyboard-frames:', error);
-      res.status(500).json({ error: message });
+      const classified = classifyGeminiApiError(
+        error,
+        'Error auto-generando los 4 frames de storyboard.'
+      );
+      logClassifiedRouteError('/api/generate-storyboard-frames', classified);
+      res.status(classified.status).json({ error: classified.message });
     }
   });
 
@@ -2629,7 +3227,135 @@ REQUISITOS OBLIGATORIOS PARA LOS 4 FRAMES:
     });
   }
 
-  app.listen(PORT, '0.0.0.0', () => {
+  const httpServer = http.createServer(app);
+  const wss = new WebSocketServer({ noServer: true });
+
+  httpServer.on('upgrade', (request, socket, head) => {
+    const rawUrl = request.url || '/';
+    const url = new URL(rawUrl, `http://${request.headers.host || 'localhost'}`);
+    if (url.pathname === '/api/live-voice') {
+      wss.handleUpgrade(request, socket, head, (ws) => {
+        wss.emit('connection', ws, request);
+      });
+    }
+  });
+
+  wss.on('connection', async (ws: WebSocket, req) => {
+    const reqUrl = new URL(req.url || '/api/live-voice', 'http://localhost');
+    const projectTitle = reqUrl.searchParams.get('projectTitle') || 'AUTEUR Studio';
+    const sequenceTitle = reqUrl.searchParams.get('sequenceTitle') || 'Secuencia Activa';
+    const directorStyle = reqUrl.searchParams.get('directorStyle') || 'Cinematográfico';
+    const voicePreset = normalizeVoicePreset(reqUrl.searchParams.get('voicePreset') || 'Charon');
+    const continuityBible = (reqUrl.searchParams.get('continuityBible') || '').slice(0, 1800);
+
+    let session: Awaited<ReturnType<GoogleGenAI['live']['connect']>> | null = null;
+    try {
+      const ai = getGenAIClient();
+      session = await ai.live.connect({
+        model: 'gemini-3.8-live',
+        config: {
+          responseModalities: [Modality.AUDIO],
+          speechConfig: {
+            voiceConfig: {
+              prebuiltVoiceConfig: { voiceName: voicePreset },
+            },
+          },
+          inputAudioTranscription: {},
+          outputAudioTranscription: {},
+          systemInstruction: `Eres el Agente Director y Productor Ejecutivo de AUTEUR Studio conversando en tiempo real por voz con el cineasta sobre la película "${projectTitle}" (Secuencia activa: "${sequenceTitle}", Estilo: ${directorStyle}).
+Contexto de Biblia de Continuidad: ${continuityBible || 'Sin notas previas.'}
+Habla en español natural, directo, práctico y cinematográfico. Guía al usuario paso a paso (1. Proyecto y Biblia -> 2. Ingesta y Producción -> 3. Guion y Notas al Pie -> 4. Storyboard / Pre-Vis 3D / Omni Flash -> 5. Aprobar Versión Final -> 6. Tráiler 30s y PDF) y da sugerencias concretas de cámara, luz Kelvin, diálogos y montaje.`,
+        },
+        callbacks: {
+          onopen: () => {
+            if (ws.readyState === WebSocket.OPEN) {
+              ws.send(JSON.stringify({ ready: true }));
+            }
+          },
+          onmessage: (msg) => {
+            if (ws.readyState !== WebSocket.OPEN) return;
+            const sc = msg.serverContent;
+            if (!sc) return;
+
+            if (sc.interrupted) {
+              ws.send(JSON.stringify({ interrupted: true }));
+            }
+            if (sc.inputTranscription?.text) {
+              ws.send(JSON.stringify({ inputTranscript: sc.inputTranscription.text }));
+            }
+            if (sc.outputTranscription?.text) {
+              ws.send(JSON.stringify({ outputTranscript: sc.outputTranscription.text }));
+            }
+            if (sc.modelTurn?.parts) {
+              for (const part of sc.modelTurn.parts) {
+                if (part.inlineData?.data) {
+                  ws.send(
+                    JSON.stringify({
+                      audio: part.inlineData.data,
+                      mimeType: part.inlineData.mimeType || 'audio/pcm;rate=24000',
+                    })
+                  );
+                }
+              }
+            }
+            if (sc.turnComplete) {
+              ws.send(JSON.stringify({ turnComplete: true }));
+            }
+          },
+          onerror: (err) => {
+            if (ws.readyState === WebSocket.OPEN) {
+              const classified = classifyGeminiApiError(err, 'Error en sesión de voz en vivo.');
+              ws.send(JSON.stringify({ error: classified.message }));
+            }
+          },
+          onclose: () => {
+            if (ws.readyState === WebSocket.OPEN) {
+              ws.close();
+            }
+          },
+        },
+      });
+    } catch (err) {
+      if (ws.readyState === WebSocket.OPEN) {
+        const classified = classifyGeminiApiError(
+          err,
+          'No se pudo conectar con Gemini Live (gemini-3.8-live).'
+        );
+        ws.send(JSON.stringify({ error: classified.message }));
+        ws.close();
+      }
+      return;
+    }
+
+    ws.on('message', (raw) => {
+      if (!session) return;
+      try {
+        const msg = JSON.parse(raw.toString()) as { audio?: string; text?: string };
+        if (typeof msg.audio === 'string' && msg.audio.length > 0) {
+          session.sendRealtimeInput({
+            audio: { data: msg.audio, mimeType: 'audio/pcm;rate=16000' },
+          });
+        } else if (typeof msg.text === 'string' && msg.text.trim()) {
+          session.sendClientContent({
+            turns: [{ role: 'user', parts: [{ text: msg.text.trim() }] }],
+            turnComplete: true,
+          });
+        }
+      } catch {
+        // Ignore malformed WS message
+      }
+    });
+
+    ws.on('close', () => {
+      try {
+        session?.close();
+      } catch {
+        // Ignore close errors
+      }
+    });
+  });
+
+  httpServer.listen(PORT, '0.0.0.0', () => {
     console.log(`AUTEUR Studio server listening on http://0.0.0.0:${PORT}`);
   });
 }

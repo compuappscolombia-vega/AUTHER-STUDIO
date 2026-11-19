@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { X } from 'lucide-react';
 import type { SourceMaterialType } from '../types/studio';
 import { DIRECTOR_STYLES } from '../utils/studioLogic';
@@ -21,6 +21,17 @@ export function NewProjectModal({ open, onClose, onCreate }: NewProjectModalProp
   const [continuityBible, setContinuityBible] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState('');
+
+  useEffect(() => {
+    if (!open) return;
+    function onKeyDown(e: KeyboardEvent) {
+      if (e.key === 'Escape' && !submitting) {
+        onClose();
+      }
+    }
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [open, submitting, onClose]);
 
   if (!open) return null;
 
@@ -114,8 +125,8 @@ export function NewProjectModal({ open, onClose, onCreate }: NewProjectModalProp
                 className="w-full rounded-lg border border-white/15 bg-[#0B0B0E] px-3 py-2.5 text-sm text-[#F2F0EB] focus:border-[#E5A93C] focus:outline-none"
               >
                 {DIRECTOR_STYLES.map((style) => (
-                  <option key={style.id} value={`${style.label} (${style.references})`}>
-                    {style.label}
+                  <option key={style.id} value={style.label}>
+                    {style.label} ({style.references})
                   </option>
                 ))}
               </select>

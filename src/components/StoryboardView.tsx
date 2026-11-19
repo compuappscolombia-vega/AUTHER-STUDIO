@@ -7,12 +7,14 @@ import type {
   StoryboardCard,
 } from '../types/studio';
 import { RESOLUTION_OPTIONS, normalizeResolution } from '../utils/productionPipeline';
+import { parseApiResponse } from '../utils/apiClient';
 
 interface StoryboardViewProps {
   userId: string;
   projectId: string;
   sequence: ProductionSequence;
   defaultResolution?: ResolutionTier;
+  onEnsureProjectSynced: () => Promise<void>;
   onProjectMediaUpdated: (project: ProductionProject) => Promise<void>;
 }
 
@@ -21,6 +23,7 @@ export function StoryboardView({
   projectId,
   sequence,
   defaultResolution = '4K',
+  onEnsureProjectSynced,
   onProjectMediaUpdated,
 }: StoryboardViewProps) {
   const [activeCardId, setActiveCardId] = useState<string | null>(null);
@@ -36,8 +39,20 @@ export function StoryboardView({
   const [mediaNotice, setMediaNotice] = useState<string | null>(null);
   const [mediaError, setMediaError] = useState<string | null>(null);
 
+  // Standalone Text-to-Video state (Omni Flash)
+  const [directClipPrompt, setDirectClipPrompt] = useState('');
+  const [directClipRatio, setDirectClipRatio] = useState<'16:9' | '9:16'>('16:9');
+  const [directClipDuration, setDirectClipDuration] = useState<'4s' | '6s' | '8s' | '10s'>('6s');
+  const [generatingDirectClip, setGeneratingDirectClip] = useState(false);
+
+  const frames = sequence.storyboardFrames || [];
   const activeCard: StoryboardCard | null =
-    sequence.storyboardFrames.find((f) => f.id === activeCardId) || null;
+    frames.find((f) => f.id === activeCardId) || null;
+
+  useEffect(() => {
+    setSelectedResolution(normalizeResolution(sequence.targetResolution || defaultResolution));
+    setDirectClipPrompt(sequence.hyperRealisticPrompt || sequence.directorVision || '');
+  }, [sequence.id, sequence.targetResolution, defaultResolution]);
 
   useEffect(() => {
     function onKeyDown(e: KeyboardEvent) {
@@ -55,7 +70,59 @@ export function StoryboardView({
       setCopiedId(id);
       setTimeout(() => setCopiedId(null), 1500);
     } catch {
-      // Ignore clipboard failure in restricted contexts
+      // Ignore clipboard failure
+    }
+  }
+
+  async function pollVideoJobUntilDone(jobId: string): Promise<ProductionProject | null> {
+    for (let attempt = 0; attempt < 95; attempt++) {
+      await new Promise((resolve) => setTimeout(resolve, 2500));
+      const res = await fetch(`/api/video-jobs/${encodeURIComponent(jobId)}`, {
+        headers: { 'x-user-id': userId },
+      });
+      const data = await parseApiResponse<{
+        status: 'pending' | 'completed' | 'failed';
+        project?: ProductionProject;
+        error?: string;
+      }>(res, 'Error consultando el estado del renderizado de video');
+
+      if (data.status === 'completed') {
+        return data.project || null;
+      }
+      if (data.status === 'failed') {
+        throw new Error(data.error || 'Omni Flash no pudo finalizar el renderizado del video.');
+      }
+    }
+    throw new Error('Tiempo de espera agotado generando el video con Omni Flash.');
+  }
+
+  async function runVideoGeneration(payload: Record<string, unknown>, targetFrameId?: string) {
+    await onEnsureProjectSynced();
+    const res = await fetch('/api/generate-video', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-user-id': userId,
+      },
+      body: JSON.stringify({ ...payload, asyncJob: true }),
+    });
+    const data = await parseApiResponse<{
+      status?: string;
+      jobId?: string;
+      project?: ProductionProject;
+    }>(res, 'No se pudo iniciar la generación de video con Omni Flash');
+
+    let finalProject: ProductionProject | null = data.project || null;
+    if (data.status === 'pending' && data.jobId) {
+      setMediaNotice('Renderizando clip cinematográfico con Omni Flash (puede tardar 25-60s)...');
+      finalProject = await pollVideoJobUntilDone(data.jobId);
+    }
+    if (finalProject) {
+      if (targetFrameId) {
+        setMediaMode((prev) => ({ ...prev, [targetFrameId]: 'video' }));
+      }
+      await onProjectMediaUpdated(finalProject);
+      setMediaNotice('Clip de video generado y guardado en tu secuencia.');
     }
   }
 
@@ -64,6 +131,7 @@ export function StoryboardView({
     setMediaError(null);
     setMediaNotice(null);
     try {
+      await onEnsureProjectSynced();
       const res = await fetch('/api/generate-storyboard-frames', {
         method: 'POST',
         headers: {
@@ -77,19 +145,24 @@ export function StoryboardView({
           renderImages: true,
         }),
       });
-      const data = await res.json();
-      if (!res.ok) {
-        throw new Error(
-          data.error || 'El Agente Director no pudo generar los 4 frames de storyboard.'
-        );
-      }
+      const data = await parseApiResponse<{
+        project?: ProductionProject;
+        renderedCount?: number;
+        imageWarnings?: string[];
+      }>(res, 'El Agente Director no pudo generar los 4 frames de storyboard');
+
       if (data.project) {
         setBrokenImages({});
-        await onProjectMediaUpdated(data.project as ProductionProject);
+        await onProjectMediaUpdated(data.project);
       }
       const renderedCount = Number(data.renderedCount || 0);
-      const warnings = Array.isArray(data.imageWarnings) ? (data.imageWarnings as string[]) : [];
-      if (warnings.length > 0 && renderedCount < 4) {
+      const warnings = Array.isArray(data.imageWarnings) ? data.imageWarnings : [];
+      if (warnings.length > 0 && renderedCount === 0) {
+        setMediaError(warnings[0]);
+        setMediaNotice(
+          `El Agente Director diseñó los 4 frames en texto (0/4 imágenes renderizadas con Nano).`
+        );
+      } else if (warnings.length > 0 && renderedCount < 4) {
         setMediaNotice(
           `El Agente Director diseñó los 4 frames clave (${renderedCount}/4 renderizados con Nano). Aviso visual: ${warnings[0]}`
         );
@@ -113,6 +186,7 @@ export function StoryboardView({
     setGeneratingImgId(frame.id);
     setMediaError(null);
     try {
+      await onEnsureProjectSynced();
       const res = await fetch('/api/generate-image', {
         method: 'POST',
         headers: {
@@ -128,14 +202,14 @@ export function StoryboardView({
           resolution: selectedResolution,
         }),
       });
-      const data = await res.json();
-      if (!res.ok) {
-        throw new Error(data.error || 'No se pudo generar la imagen con Nano.');
-      }
+      const data = await parseApiResponse<{ project?: ProductionProject }>(
+        res,
+        'No se pudo generar la imagen con Nano'
+      );
       if (data.project) {
         setBrokenImages((prev) => ({ ...prev, [frame.id]: false }));
         setMediaMode((prev) => ({ ...prev, [frame.id]: 'image' }));
-        await onProjectMediaUpdated(data.project as ProductionProject);
+        await onProjectMediaUpdated(data.project);
       }
     } catch (err) {
       setMediaError(
@@ -149,14 +223,10 @@ export function StoryboardView({
   async function handleGenerateVideo(frame: StoryboardCard) {
     setGeneratingVidId(frame.id);
     setMediaError(null);
+    setMediaNotice(null);
     try {
-      const res = await fetch('/api/generate-video', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-user-id': userId,
-        },
-        body: JSON.stringify({
+      await runVideoGeneration(
+        {
           projectId,
           sequenceId: sequence.id,
           frameId: frame.id,
@@ -164,22 +234,43 @@ export function StoryboardView({
           aspectRatio: frame.aspectRatio || sequence.aspectRatio,
           duration: '6s',
           imageUrl: frame.imageUrl,
-        }),
-      });
-      const data = await res.json();
-      if (!res.ok) {
-        throw new Error(data.error || 'No se pudo generar el video con Omni Flash.');
-      }
-      if (data.project) {
-        setMediaMode((prev) => ({ ...prev, [frame.id]: 'video' }));
-        await onProjectMediaUpdated(data.project as ProductionProject);
-      }
+        },
+        frame.id
+      );
     } catch (err) {
       setMediaError(
         err instanceof Error ? err.message : 'Error generando video con Omni Flash.'
       );
     } finally {
       setGeneratingVidId(null);
+    }
+  }
+
+  async function handleGenerateDirectClip(e: React.FormEvent) {
+    e.preventDefault();
+    const cleanPrompt = directClipPrompt.trim();
+    if (cleanPrompt.length < 10) {
+      setMediaError('Describe la escena en al menos 10 caracteres para generar el clip de video.');
+      return;
+    }
+    setGeneratingDirectClip(true);
+    setMediaError(null);
+    setMediaNotice(null);
+    try {
+      await runVideoGeneration({
+        projectId,
+        sequenceId: sequence.id,
+        title: `Clip Directo (${directClipRatio} · ${directClipDuration})`,
+        prompt: cleanPrompt,
+        aspectRatio: directClipRatio,
+        duration: directClipDuration,
+      });
+    } catch (err) {
+      setMediaError(
+        err instanceof Error ? err.message : 'Error generando clip de texto a video con Omni Flash.'
+      );
+    } finally {
+      setGeneratingDirectClip(false);
     }
   }
 
@@ -191,8 +282,7 @@ export function StoryboardView({
             Storyboard y Generación Visual (Nano &amp; Omni Flash)
           </h2>
           <p className="text-xs text-[#8D8981] mt-0.5">
-            Genera automáticamente 4 frames clave basados en la biblia de continuidad y el guion
-            técnico, o renderiza cada plano con Nano y Omni Flash.
+            Genera 4 frames clave con Nano, crea clips directos Texto→Video o anima cada fotograma con Omni Flash.
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-3">
@@ -220,7 +310,7 @@ export function StoryboardView({
           <button
             type="button"
             onClick={handleAutoGenerate4Frames}
-            disabled={autoGenerating4 || Boolean(generatingImgId) || Boolean(generatingVidId)}
+            disabled={autoGenerating4 || Boolean(generatingImgId) || Boolean(generatingVidId) || generatingDirectClip}
             className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg bg-[#E5A93C] hover:bg-[#EDA949] disabled:opacity-60 text-[#0B0B0E] text-xs font-semibold whitespace-nowrap transition-colors"
           >
             <Sparkles className="w-3.5 h-3.5 shrink-0" />
@@ -232,11 +322,87 @@ export function StoryboardView({
           </button>
 
           <span className="text-xs font-mono-tech text-[#8D8981] tabular-nums">
-            {sequence.storyboardFrames.length}{' '}
-            {sequence.storyboardFrames.length === 1 ? 'fotograma' : 'fotogramas'}
+            {frames.length} {frames.length === 1 ? 'fotograma' : 'fotogramas'}
           </span>
         </div>
       </div>
+
+      {/* Standalone Text-to-Video Studio (16:9 or 9:16 via gemini-omni-1.2-flash) */}
+      <form
+        onSubmit={handleGenerateDirectClip}
+        className="p-4 rounded-xl border border-[#38B2AC]/30 bg-[#10181B] space-y-3"
+      >
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div className="flex items-center gap-2 text-xs font-semibold text-[#5EEAD4]">
+            <Video className="w-4 h-4 shrink-0" />
+            <span>Generador Directo Texto → Video (Omni Flash)</span>
+          </div>
+          <span className="text-[11px] font-mono-tech text-[#8D8981]">
+            gemini-omni-1.2-flash · 720p MP4
+          </span>
+        </div>
+
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-3 items-end">
+          <div className="lg:col-span-7">
+            <label htmlFor="direct-video-prompt" className="block text-[11px] text-[#C8C3BA] mb-1">
+              Prompt cinematográfico del clip (sin requerir fotograma previo)
+            </label>
+            <input
+              id="direct-video-prompt"
+              type="text"
+              value={directClipPrompt}
+              onChange={(e) => setDirectClipPrompt(e.target.value)}
+              placeholder="Ej: Slow tracking dolly through rainy neon harbor at night, anamorphic reflections, 35mm film grain..."
+              className="w-full rounded-lg border border-white/15 bg-[#0B0B0E] px-3 py-2 text-xs text-[#F2F0EB] placeholder:text-[#6E6A63] focus:border-[#38B2AC] focus:outline-none"
+            />
+          </div>
+
+          <div className="lg:col-span-2">
+            <label htmlFor="direct-video-ratio" className="block text-[11px] text-[#C8C3BA] mb-1">
+              Formato
+            </label>
+            <select
+              id="direct-video-ratio"
+              value={directClipRatio}
+              onChange={(e) => setDirectClipRatio(e.target.value as '16:9' | '9:16')}
+              className="w-full rounded-lg border border-white/15 bg-[#0B0B0E] px-2.5 py-2 text-xs font-mono-tech text-[#F2F0EB] focus:border-[#38B2AC] focus:outline-none"
+            >
+              <option value="16:9">16:9 Cine</option>
+              <option value="9:16">9:16 Vertical</option>
+            </select>
+          </div>
+
+          <div className="lg:col-span-1">
+            <label htmlFor="direct-video-dur" className="block text-[11px] text-[#C8C3BA] mb-1">
+              Duración
+            </label>
+            <select
+              id="direct-video-dur"
+              value={directClipDuration}
+              onChange={(e) =>
+                setDirectClipDuration(e.target.value as '4s' | '6s' | '8s' | '10s')
+              }
+              className="w-full rounded-lg border border-white/15 bg-[#0B0B0E] px-2 py-2 text-xs font-mono-tech text-[#F2F0EB] focus:border-[#38B2AC] focus:outline-none"
+            >
+              <option value="4s">4s</option>
+              <option value="6s">6s</option>
+              <option value="8s">8s</option>
+              <option value="10s">10s</option>
+            </select>
+          </div>
+
+          <div className="lg:col-span-2">
+            <button
+              type="submit"
+              disabled={generatingDirectClip || autoGenerating4 || Boolean(generatingVidId)}
+              className="w-full inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg bg-[#38B2AC] hover:bg-[#4FD1C5] disabled:opacity-60 text-[#0B0B0E] text-xs font-semibold whitespace-nowrap"
+            >
+              <Video className="w-3.5 h-3.5 shrink-0" />
+              <span>{generatingDirectClip ? 'Creando clip...' : 'Generar Clip'}</span>
+            </button>
+          </div>
+        </div>
+      </form>
 
       {mediaNotice && (
         <div className="rounded-lg border border-[#38B2AC]/35 bg-[#122625] px-4 py-3 text-xs text-[#A7F3D0] flex items-center justify-between gap-3">
@@ -270,7 +436,7 @@ export function StoryboardView({
       )}
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
-        {sequence.storyboardFrames.map((frame) => {
+        {frames.map((frame) => {
           const hasImage = Boolean(frame.imageUrl) && !brokenImages[frame.id];
           const hasVideo = Boolean(frame.videoUrl);
           const showVideo = hasVideo && (mediaMode[frame.id] === 'video' || !hasImage);
@@ -375,7 +541,7 @@ export function StoryboardView({
                   <button
                     type="button"
                     onClick={() => handleGenerateImage(frame)}
-                    disabled={busyImg || busyVid || autoGenerating4}
+                    disabled={busyImg || busyVid || autoGenerating4 || generatingDirectClip}
                     className="flex-1 min-w-[165px] inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg border border-[#E5A93C]/45 bg-[#1B1812] hover:bg-[#272116] disabled:opacity-60 text-xs font-medium text-[#F2F0EB] whitespace-nowrap transition-colors"
                   >
                     <ImagePlus className="w-3.5 h-3.5 text-[#E5A93C] shrink-0" />
@@ -387,7 +553,7 @@ export function StoryboardView({
                   <button
                     type="button"
                     onClick={() => handleGenerateVideo(frame)}
-                    disabled={busyImg || busyVid || autoGenerating4}
+                    disabled={busyImg || busyVid || autoGenerating4 || generatingDirectClip}
                     className="flex-1 min-w-[180px] inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg border border-white/15 bg-[#181822] hover:bg-[#222230] disabled:opacity-60 text-xs font-medium text-[#F2F0EB] whitespace-nowrap transition-colors"
                   >
                     <Video className="w-3.5 h-3.5 text-[#38B2AC] shrink-0" />
