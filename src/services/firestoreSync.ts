@@ -158,6 +158,10 @@ export async function saveSequenceToFirestore(
     const snap = await getDoc(seqRef);
     const sequenceData = stripUndefined({
       sourceFilename: sequence.sourceFilename || null,
+      targetResolution: sequence.targetResolution || '4K',
+      hyperRealisticPrompt: sequence.hyperRealisticPrompt || '',
+      chapterIndex: typeof sequence.chapterIndex === 'number' ? sequence.chapterIndex : null,
+      chapterTotal: typeof sequence.chapterTotal === 'number' ? sequence.chapterTotal : null,
       cameraSystem: sequence.cameraSystem,
       lensPackage: sequence.lensPackage,
       filmStockOrLut: sequence.filmStockOrLut,
@@ -165,6 +169,7 @@ export async function saveSequenceToFirestore(
       lighting: sequence.lighting,
       shotList: sequence.shotList,
       soundDesign: sequence.soundDesign,
+      voiceOverTracks: sequence.voiceOverTracks || [],
       audioAnalysis: sequence.audioAnalysis || null,
       vfx: sequence.vfx,
       screenplay: sequence.screenplay,
@@ -294,6 +299,13 @@ export async function loadUserProjectsFromFirestore(
           sourceFilename: (data.sourceFilename as string | undefined) || undefined,
           directorStyle: String(s.directorStyle || ''),
           aspectRatio: String(s.aspectRatio || '2.39:1'),
+          targetResolution:
+            (data.targetResolution as ProductionSequence['targetResolution']) || '4K',
+          hyperRealisticPrompt: (data.hyperRealisticPrompt as string | undefined) || undefined,
+          chapterIndex:
+            typeof data.chapterIndex === 'number' ? data.chapterIndex : undefined,
+          chapterTotal:
+            typeof data.chapterTotal === 'number' ? data.chapterTotal : undefined,
           cameraSystem: String(data.cameraSystem || 'ARRI Alexa 65'),
           lensPackage: String(data.lensPackage || 'Cooke Anamorphic'),
           filmStockOrLut: String(data.filmStockOrLut || 'Kodak 2383 Print LUT'),
@@ -303,6 +315,8 @@ export async function loadUserProjectsFromFirestore(
           lighting: data.lighting as ProductionSequence['lighting'],
           shotList: (data.shotList as ProductionSequence['shotList']) || [],
           soundDesign: data.soundDesign as ProductionSequence['soundDesign'],
+          voiceOverTracks:
+            (data.voiceOverTracks as ProductionSequence['voiceOverTracks']) || undefined,
           audioAnalysis: (data.audioAnalysis as ProductionSequence['audioAnalysis']) || undefined,
           vfx: data.vfx as ProductionSequence['vfx'],
           screenplay: (data.screenplay as ProductionSequence['screenplay']) || [],

@@ -6,13 +6,22 @@ import multer from 'multer';
 import { fileURLToPath } from 'url';
 import { GoogleGenAI, ThinkingLevel, Type } from '@google/genai';
 import type {
+  AgentDiagnosticReport,
+  AdminAgentProfile,
   AudioAnalysisReport,
+  BookChapterItem,
+  ChapterPlan,
   LearningCategory,
   LearningLesson,
   ProductionProject,
   ProductionSequence,
   ProjectAsset,
+  ProjectTrailer,
+  ResolutionTier,
   SourceMaterialType,
+  StoryboardCard,
+  VoiceOverTrack,
+  VoicePreset,
 } from './src/types/studio';
 import { buildContinuationContext } from './src/utils/studioLogic';
 import {
@@ -21,6 +30,22 @@ import {
   validateLessonInput,
 } from './src/utils/learningEngine';
 import { buildRatedChoiceLessons } from './src/utils/studioIntelligence';
+import {
+  buildHyperRealisticResolutionSpec,
+  getNanoImageSizeForResolution,
+  markChapterCompleted,
+  normalizeResolution,
+  normalizeTrailerBeats,
+} from './src/utils/productionPipeline';
+import {
+  DEFAULT_ADMIN_AGENT_PROFILE,
+  buildAdminTrainingPromptBlock,
+  computeSequenceDiagnostics,
+  normalizeAdminAgentProfile,
+  normalizeFourKeyStoryboardFrames,
+  validateAdminDirective,
+} from './src/utils/adminAndStoryboardLogic';
+import { buildLocalPreviewFixture } from './src/utils/devPreviewFixture';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -147,6 +172,40 @@ function saveLearningMemory(userId: string, lessons: LearningLesson[]): void {
   const file = getLearningFile(userId);
   fs.mkdirSync(path.dirname(file), { recursive: true });
   fs.writeFileSync(file, JSON.stringify(lessons, null, 2), 'utf-8');
+}
+
+function getAdminConfigFile(): string {
+  return path.join(WORKSPACE_DIR, 'admin', 'agent_config.json');
+}
+
+function ensureAdminAgentProfile(): AdminAgentProfile {
+  const file = getAdminConfigFile();
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  if (!fs.existsSync(file)) {
+    const initial: AdminAgentProfile = {
+      ...DEFAULT_ADMIN_AGENT_PROFILE,
+      updatedAt: new Date().toISOString(),
+    };
+    fs.writeFileSync(file, JSON.stringify(initial, null, 2), 'utf-8');
+    return initial;
+  }
+  try {
+    const raw = fs.readFileSync(file, 'utf-8');
+    return normalizeAdminAgentProfile(JSON.parse(raw) as Partial<AdminAgentProfile>);
+  } catch {
+    return { ...DEFAULT_ADMIN_AGENT_PROFILE, updatedAt: new Date().toISOString() };
+  }
+}
+
+function saveAdminAgentProfile(profile: AdminAgentProfile): AdminAgentProfile {
+  const normalized = normalizeAdminAgentProfile({
+    ...profile,
+    updatedAt: new Date().toISOString(),
+  });
+  const file = getAdminConfigFile();
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.writeFileSync(file, JSON.stringify(normalized, null, 2), 'utf-8');
+  return normalized;
 }
 
 function getGenAIClient(): GoogleGenAI {
@@ -300,6 +359,38 @@ function resolveLocalImageBase64(imageUrl?: string): { data: string; mimeType: s
   }
 }
 
+function resolveProjectAssetBuffer(
+  userId: string,
+  project: ProductionProject,
+  assetId: string
+): { asset: ProjectAsset; buffer: Buffer } | null {
+  const asset = (project.assets || []).find((a) => a.id === assetId);
+  if (!asset || !asset.url.startsWith('/workspace-assets/')) return null;
+  try {
+    const parts = asset.url.replace('/workspace-assets/', '').split('/');
+    if (parts.length !== 3) return null;
+    const fname = sanitizeSlug(decodeURIComponent(parts[2]));
+    const targetPath = path.join(getProjectAssetsDir(userId, project.id), fname);
+    if (!fs.existsSync(targetPath)) return null;
+    return { asset, buffer: fs.readFileSync(targetPath) };
+  } catch {
+    return null;
+  }
+}
+
+function normalizeVoicePreset(raw?: string): VoicePreset {
+  if (
+    raw === 'Charon' ||
+    raw === 'Kore' ||
+    raw === 'Fenrir' ||
+    raw === 'Puck' ||
+    raw === 'Zephyr'
+  ) {
+    return raw;
+  }
+  return 'Charon';
+}
+
 async function transcribeAudioWithGemini(
   ai: GoogleGenAI,
   fileBuffer: Buffer,
@@ -352,17 +443,31 @@ const AUDIO_ANALYSIS_SCHEMA = {
   ],
 };
 
-const PRODUCER_SYSTEM_INSTRUCTION = `Eres AUTEUR, un Productor y Director de Cine de Hollywood mundialmente reconocido y premiado en los Premios Óscar, Cannes y Venecia.
+const PRODUCER_SYSTEM_INSTRUCTION = `Eres AUTEUR, un Productor, Director de Cine, Guionista, Experto en Escenografía y Director de Fotografía de Hollywood premiado en los Premios Óscar, Cannes y Venecia.
 Tu sello personal es convertir cualquier material fuente —capítulos de libros, audiolibros narrados, relatos cortos o sinopsis— en una producción cinematográfica monumental de clase mundial.
 
 REGLAS DE ORO DE PRODUCCIÓN:
-1. FIDELIDAD ABSOLUTA AL MATERIAL FUENTE: Respeta los eventos, nombres propios, tono emocional, diálogos clave y atmósfera de la obra proporcionada. Si recibes un archivo de audio (MP3, WAV, M4A, OGG), escucha no solo las palabras sino la narración, el tono emocional, el ritmo, las pausas y los efectos sonoros para elaborar un informe de dirección y diseño sonoro preciso junto con la transcripción.
-2. DIRECCIÓN DE FOTOGRAFÍA REAL: Especifica cuerpos de cámara reales (ARRI Alexa 65, Panavision Millennium DXL2, RED V-Raptor XL, Sony VENICE 2), ópticas concretas (Cooke Anamorphic, Panavision Sphero 65, Leitz Summilux-C), distancias focales en mm y movimientos motivados.
-3. ILUMINACIÓN Y COLORIMETRÍA: Define fuentes principales, ratios de contraste, temperaturas Kelvin exactas y paleta de color con códigos hexadecimales reales.
-4. INGENIERÍA SONORA DOLBY ATMOS: Diseña capas ambientales, frecuencias subgraves concretas (Hz), foley hiperrealista, silencios dramáticos y score musical con tempo en BPM.
-5. GUION CINEMATOGRÁFICO PROFESIONAL: Redacta escenas completas en español con sluglines estándar, beats de acción visual pura ("Show, don't tell"), indicaciones técnicas de cámara y sonido, y diálogos con acotaciones precisas.
-6. STORYBOARD PROMPTS: Para cada tarjeta de storyboard, escribe el prompt visual detallado en inglés y el prompt de movimiento de cámara en inglés.
-7. AUTOAPRENDIZAJE CONTINUO: Aplica activamente las lecciones acumuladas por el estudio que recibes en el contexto para mejorar tu criterio en cada nueva producción.`;
+1. FIDELIDAD ABSOLUTA Y PRODUCCIÓN CAPÍTULO A CAPÍTULO: Respeta los eventos, nombres propios, tono emocional, diálogos clave y atmósfera de la obra proporcionada. Si estás produciendo un capítulo específico de un libro o audiolibro largo, céntrate exclusivamente en ese capítulo respetando la Biblia de Continuidad heredada de los capítulos previos. Si recibes un archivo de audio (MP3, WAV, M4A, OGG), escucha no solo las palabras sino la narración, el tono emocional, el ritmo, las pausas y los efectos sonoros para elaborar un informe de dirección y diseño sonoro preciso junto con la transcripción.
+2. DIRECCIÓN DE FOTOGRAFÍA Y ESCENOGRAFÍA HIPERREALISTA: Especifica cuerpos de cámara reales (ARRI Alexa 65, Panavision Millennium DXL2, RED V-Raptor XL, Sony VENICE 2), ópticas concretas (Cooke Anamorphic, Panavision Sphero 65, Leitz Summilux-C), distancias focales en mm, profundidad de campo, textura arquitectónica de escenografía, materiales PBR y movimientos motivados.
+3. PROMPT HIPERREALISTA ULTRA DEFINICIÓN: Genera "hyperRealisticPrompt" en inglés describiendo con precisión fotográfica absoluta el estilo visual de la secuencia adaptado a la resolución objetivo (720p, 1080p, 2K o 4K), especificando cámara, lente, apertura, iluminación en Kelvin, atmósfera volumétrica, textura de piel/vestuario/escenografía y colorimetría.
+4. TODOS LOS PLANOS NECESARIOS: En "shotList", genera todos los planos necesarios (mínimo 6 planos detallados) para cubrir cada beat dramático con encuadre, óptica, movimiento y duración realista.
+5. VOCES EN OFF REALISTAS: En "voiceOverTracks", genera líneas de voz en off cinematográficas realistas (narrador o monólogo interior del personaje) con dirección vocal actoral ("deliveryDirection"), pista temporal ("timecodeHint") y selección de timbre ("voicePreset": Charon, Kore, Fenrir, Puck o Zephyr).
+6. ILUMINACIÓN, DOLBY ATMOS Y GUION: Define fuentes principales, temperaturas Kelvin exactas, paleta hexadecimal, capas Dolby Atmos, subgraves en Hz, foley, silencios, score con BPM y guion profesional completo en español.
+7. STORYBOARD PROMPTS: Para cada tarjeta de storyboard, escribe el prompt visual hiperrealista detallado en inglés (adaptado a la ultra definición solicitada) y el prompt de movimiento de cámara en inglés.
+8. AUTOAPRENDIZAJE CONTINUO: Aplica activamente las lecciones acumuladas por el estudio que recibes en el contexto para mejorar tu criterio en cada nueva producción.`;
+
+function buildEffectiveProducerInstruction(lessons: LearningLesson[]): string {
+  const adminProfile = ensureAdminAgentProfile();
+  const adminBlock = buildAdminTrainingPromptBlock(adminProfile);
+  const learningBlock = buildLearningPromptContext(lessons, 8);
+  return `${PRODUCER_SYSTEM_INSTRUCTION}
+
+--- DIRECTIVAS DE ENTRENAMIENTO DEL ADMINISTRADOR ---
+${adminBlock}
+
+--- MEMORIA ACTIVA DE AUTOAPRENDIZAJE ---
+${learningBlock}`;
+}
 
 const PRODUCTION_RESPONSE_SCHEMA = {
   type: Type.OBJECT,
@@ -372,6 +477,7 @@ const PRODUCTION_RESPONSE_SCHEMA = {
     filmStockOrLut: { type: Type.STRING },
     logline: { type: Type.STRING },
     directorVision: { type: Type.STRING },
+    hyperRealisticPrompt: { type: Type.STRING },
     colorPalette: {
       type: Type.ARRAY,
       items: {
@@ -444,6 +550,28 @@ const PRODUCTION_RESPONSE_SCHEMA = {
         'tempoBpm',
       ],
     },
+    voiceOverTracks: {
+      type: Type.ARRAY,
+      items: {
+        type: Type.OBJECT,
+        properties: {
+          characterOrNarrator: { type: Type.STRING },
+          voicePersona: { type: Type.STRING },
+          voicePreset: { type: Type.STRING },
+          deliveryDirection: { type: Type.STRING },
+          timecodeHint: { type: Type.STRING },
+          text: { type: Type.STRING },
+        },
+        required: [
+          'characterOrNarrator',
+          'voicePersona',
+          'voicePreset',
+          'deliveryDirection',
+          'timecodeHint',
+          'text',
+        ],
+      },
+    },
     audioAnalysis: AUDIO_ANALYSIS_SCHEMA,
     vfx: {
       type: Type.OBJECT,
@@ -502,14 +630,150 @@ const PRODUCTION_RESPONSE_SCHEMA = {
     'filmStockOrLut',
     'logline',
     'directorVision',
+    'hyperRealisticPrompt',
     'colorPalette',
     'lighting',
     'shotList',
     'soundDesign',
+    'voiceOverTracks',
     'vfx',
     'screenplay',
     'storyboardFrames',
     'continuitySummary',
+  ],
+};
+
+const CHAPTER_PLAN_SCHEMA = {
+  type: Type.OBJECT,
+  properties: {
+    chapters: {
+      type: Type.ARRAY,
+      items: {
+        type: Type.OBJECT,
+        properties: {
+          index: { type: Type.INTEGER },
+          title: { type: Type.STRING },
+          summary: { type: Type.STRING },
+          keyCharacters: { type: Type.ARRAY, items: { type: Type.STRING } },
+          estimatedStartHint: { type: Type.STRING },
+          sourceExcerpt: { type: Type.STRING },
+        },
+        required: [
+          'index',
+          'title',
+          'summary',
+          'keyCharacters',
+          'estimatedStartHint',
+          'sourceExcerpt',
+        ],
+      },
+    },
+  },
+  required: ['chapters'],
+};
+
+const TRAILER_RESPONSE_SCHEMA = {
+  type: Type.OBJECT,
+  properties: {
+    title: { type: Type.STRING },
+    tagline: { type: Type.STRING },
+    voiceDirection: { type: Type.STRING },
+    voiceOverScript: { type: Type.STRING },
+    musicPrompt: { type: Type.STRING },
+    tempoBpm: { type: Type.NUMBER },
+    soundMixNotes: { type: Type.STRING },
+    beats: {
+      type: Type.ARRAY,
+      items: {
+        type: Type.OBJECT,
+        properties: {
+          durationSec: { type: Type.NUMBER },
+          sourceSequenceId: { type: Type.STRING },
+          sourceSequenceTitle: { type: Type.STRING },
+          visualDescription: { type: Type.STRING },
+          hyperRealisticPrompt: { type: Type.STRING },
+          motionPrompt: { type: Type.STRING },
+          voiceOverLine: { type: Type.STRING },
+          onScreenTitleCard: { type: Type.STRING },
+          sfxCue: { type: Type.STRING },
+          editingTransition: { type: Type.STRING },
+        },
+        required: [
+          'durationSec',
+          'sourceSequenceId',
+          'sourceSequenceTitle',
+          'visualDescription',
+          'hyperRealisticPrompt',
+          'motionPrompt',
+          'voiceOverLine',
+          'onScreenTitleCard',
+          'sfxCue',
+          'editingTransition',
+        ],
+      },
+    },
+  },
+  required: [
+    'title',
+    'tagline',
+    'voiceDirection',
+    'voiceOverScript',
+    'musicPrompt',
+    'tempoBpm',
+    'soundMixNotes',
+    'beats',
+  ],
+};
+
+const STORYBOARD_4_FRAMES_SCHEMA = {
+  type: Type.OBJECT,
+  properties: {
+    frames: {
+      type: Type.ARRAY,
+      items: {
+        type: Type.OBJECT,
+        properties: {
+          title: { type: Type.STRING },
+          shotRef: { type: Type.STRING },
+          cameraSpec: { type: Type.STRING },
+          visualPrompt: { type: Type.STRING },
+          veoMotionPrompt: { type: Type.STRING },
+        },
+        required: ['title', 'shotRef', 'cameraSpec', 'visualPrompt', 'veoMotionPrompt'],
+      },
+    },
+  },
+  required: ['frames'],
+};
+
+const AGENT_DIAGNOSTIC_SCHEMA = {
+  type: Type.OBJECT,
+  properties: {
+    coherenceScore: { type: Type.NUMBER },
+    summary: { type: Type.STRING },
+    strengths: { type: Type.ARRAY, items: { type: Type.STRING } },
+    weaknesses: { type: Type.ARRAY, items: { type: Type.STRING } },
+    continuityRisks: { type: Type.ARRAY, items: { type: Type.STRING } },
+    recommendedLessons: {
+      type: Type.ARRAY,
+      items: {
+        type: Type.OBJECT,
+        properties: {
+          category: { type: Type.STRING },
+          insight: { type: Type.STRING },
+          rating: { type: Type.NUMBER },
+        },
+        required: ['category', 'insight', 'rating'],
+      },
+    },
+  },
+  required: [
+    'coherenceScore',
+    'summary',
+    'strengths',
+    'weaknesses',
+    'continuityRisks',
+    'recommendedLessons',
   ],
 };
 
@@ -531,7 +795,269 @@ async function startServer() {
   });
 
   app.get('/api/health', (_req, res) => {
-    res.json({ ok: true });
+    const apiKey = process.env.GEMINI_API_KEY;
+    const geminiConfigured = Boolean(apiKey && apiKey !== 'MY_GEMINI_API_KEY');
+    res.json({ ok: true, geminiConfigured });
+  });
+
+  // Admin Profile Login & Agent Inspection / Training Console Endpoints
+  app.post('/api/admin/login', (req, res) => {
+    const rawEmail = typeof req.body?.email === 'string' ? req.body.email.trim() : '';
+    const rawName = typeof req.body?.displayName === 'string' ? req.body.displayName.trim() : '';
+    const adminUid = 'admin-studio';
+    ensureWorkspaceProjects(adminUid);
+    ensureLearningMemory(adminUid);
+    ensureAdminAgentProfile();
+
+    res.json({
+      session: {
+        uid: adminUid,
+        displayName: rawName || 'Administrador AUTEUR',
+        email: rawEmail || 'compuappscolombia@gmail.com',
+        role: 'admin',
+        emailVerified: true,
+      },
+    });
+  });
+
+  app.post('/api/admin/seed-audit-project', (req, res) => {
+    const userId = getRequestUserId(req);
+    const existing = ensureWorkspaceProjects(userId);
+    const fixture = buildLocalPreviewFixture()[0];
+    const alreadyExists = existing.some((p) => p.id === fixture.id);
+    const projectToWrite: ProductionProject = alreadyExists
+      ? existing.find((p) => p.id === fixture.id)!
+      : {
+          ...fixture,
+          updatedAt: new Date().toISOString(),
+        };
+    writeProjectFolder(userId, projectToWrite);
+    const updatedList = ensureWorkspaceProjects(userId);
+    res.json({ project: projectToWrite, projects: updatedList });
+  });
+
+  app.get('/api/admin/agent-profile', (req, res) => {
+    const userId = getRequestUserId(req);
+    const profile = ensureAdminAgentProfile();
+    const lessons = ensureLearningMemory(userId);
+    res.json({
+      profile,
+      baseSystemInstruction: PRODUCER_SYSTEM_INSTRUCTION,
+      effectiveSystemInstruction: buildEffectiveProducerInstruction(lessons),
+      learningCount: lessons.length,
+      learningPreview: buildLearningPromptContext(lessons, 8),
+      activeModels: [
+        { role: 'Director / Guionista / Crítico', model: 'gemini-4-hydrogen' },
+        { role: 'Storyboard Hiperrealista (720p–4K)', model: 'gemini-nano-banana-2.1' },
+        { role: 'Clips en Movimiento', model: 'gemini-omni-1.2-flash' },
+        { role: 'Voces en Off Realistas', model: 'gemini-3.8-flash-tts' },
+        { role: 'Transcripción de Audio / Dictado', model: 'gemini-3.5-transcribe' },
+        { role: 'Música Original Tráiler 30s', model: 'lyria-3-clip-preview' },
+      ],
+    });
+  });
+
+  app.put('/api/admin/agent-profile', (req, res) => {
+    const userId = getRequestUserId(req);
+    const body = req.body ?? {};
+    const customDirectives = String(body.customDirectives || '');
+    const check = validateAdminDirective(customDirectives);
+    if (!check.valid) {
+      res.status(400).json({ error: check.error });
+      return;
+    }
+
+    const current = ensureAdminAgentProfile();
+    const saved = saveAdminAgentProfile({
+      ...current,
+      strictContinuityMode:
+        typeof body.strictContinuityMode === 'boolean'
+          ? body.strictContinuityMode
+          : current.strictContinuityMode,
+      preferredVisualGrammar:
+        typeof body.preferredVisualGrammar === 'string' && body.preferredVisualGrammar.trim()
+          ? body.preferredVisualGrammar.trim()
+          : current.preferredVisualGrammar,
+      targetAudienceTone:
+        typeof body.targetAudienceTone === 'string' && body.targetAudienceTone.trim()
+          ? body.targetAudienceTone.trim()
+          : current.targetAudienceTone,
+      customDirectives: customDirectives.trim(),
+      updatedAt: new Date().toISOString(),
+    });
+    const lessons = ensureLearningMemory(userId);
+
+    res.json({
+      profile: saved,
+      effectiveSystemInstruction: buildEffectiveProducerInstruction(lessons),
+    });
+  });
+
+  app.post('/api/admin/analyze-sequence', async (req, res) => {
+    try {
+      const userId = getRequestUserId(req);
+      const { projectId, sequenceId } = req.body ?? {};
+      const pid = String(projectId || '').trim();
+      const sid = String(sequenceId || '').trim();
+
+      if (!pid || !sid) {
+        res.status(400).json({ error: 'Selecciona un proyecto y una secuencia para auditar.' });
+        return;
+      }
+
+      const project = readProjectById(userId, pid);
+      if (!project) {
+        res.status(404).json({ error: 'Proyecto no encontrado.' });
+        return;
+      }
+      const sequence = project.sequences.find((s) => s.id === sid);
+      if (!sequence) {
+        res.status(404).json({ error: 'Secuencia no encontrada.' });
+        return;
+      }
+
+      const localMetrics = computeSequenceDiagnostics(project, sequence);
+      const ai = getGenAIClient();
+      const adminProfile = ensureAdminAgentProfile();
+      const lessons = ensureLearningMemory(userId);
+
+      const screenplayExcerpt = (sequence.screenplay || [])
+        .map(
+          (sc) =>
+            `${sc.sceneNumber}. ${sc.slugline}\n` +
+            sc.beats
+              .slice(0, 8)
+              .map((b) => `  [${b.type}] ${b.character ? `${b.character}: ` : ''}${b.text}`)
+              .join('\n')
+        )
+        .join('\n\n')
+        .slice(0, 3500);
+
+      const shotsSummary = (sequence.shotList || [])
+        .slice(0, 10)
+        .map((sh) => `${sh.shotNumber} ${sh.shotType} (${sh.lensMm}, ${sh.movement}): ${sh.framingNote}`)
+        .join('\n');
+
+      const response = await ai.models.generateContent({
+        model: 'gemini-4-hydrogen',
+        contents: `Eres el Supervisor Jefe de Calidad y Entrenador del Agente Director en AUTEUR Studio.
+Audita en profundidad la siguiente secuencia cinematográfica contra su Biblia de Continuidad y las directivas vigentes del Administrador.
+
+PROYECTO: ${project.title} (${project.genreStyle})
+SECUENCIA: ${sequence.title} (${sequence.versionStatus})
+CÁMARA Y ÓPTICA: ${sequence.cameraSystem} · ${sequence.lensPackage} · ${sequence.aspectRatio}
+ILUMINACIÓN KELVIN: ${sequence.lighting?.colorTemperatureKelvin || 'No especificada'}
+PROMPT HIPERREALISTA ACTUAL: ${sequence.hyperRealisticPrompt || 'No definido'}
+
+BIBLIA DE CONTINUIDAD:
+${project.continuityBible || '[Vacía]'}
+
+LISTA DE PLANOS:
+${shotsSummary || '[Sin planos]'}
+
+GUION TÉCNICO:
+${screenplayExcerpt || '[Sin guion]'}
+
+DIRECTIVAS ACTUALES DEL ADMINISTRADOR:
+${buildAdminTrainingPromptBlock(adminProfile)}
+
+MEMORIA ACTUAL DEL AGENTE:
+${buildLearningPromptContext(lessons, 6)}
+
+Evalúa con rigor técnico de Hollywood:
+1. coherenceScore (0-100): puntuación real de coherencia entre Biblia, guion, planos y prompts visuales.
+2. summary: diagnóstico ejecutivo claro (2-3 frases).
+3. strengths: 2 a 4 aciertos técnicos concretos.
+4. weaknesses: 2 a 4 áreas mejorables del Agente Director en esta secuencia.
+5. continuityRisks: riesgos específicos de continuidad visual, vestuario, iluminación Kelvin o diálogo.
+6. recommendedLessons: 2 a 3 reglas accionables ("category": camera|lighting|sound|screenplay|pacing|continuity, "insight": texto concreto, "rating": 4 o 5) listas para enseñar al agente.`,
+        config: {
+          responseMimeType: 'application/json',
+          responseSchema: AGENT_DIAGNOSTIC_SCHEMA,
+          thinkingConfig: { thinkingLevel: ThinkingLevel.MEDIUM },
+        },
+      });
+
+      const raw = (response.text ?? '').trim();
+      if (!raw) {
+        throw new Error('El auditor del agente no devolvió diagnóstico.');
+      }
+      const parsed = JSON.parse(raw) as Omit<AgentDiagnosticReport, 'localMetrics' | 'auditedAt'>;
+      const validCategories: LearningCategory[] = [
+        'camera',
+        'lighting',
+        'sound',
+        'screenplay',
+        'pacing',
+        'continuity',
+      ];
+
+      const report: AgentDiagnosticReport = {
+        coherenceScore: Math.max(0, Math.min(100, Math.round(Number(parsed.coherenceScore) || localMetrics.readinessScore))),
+        summary: parsed.summary || 'Auditoría completada.',
+        strengths: Array.isArray(parsed.strengths) ? parsed.strengths : [],
+        weaknesses: Array.isArray(parsed.weaknesses) ? parsed.weaknesses : [],
+        continuityRisks: Array.isArray(parsed.continuityRisks) ? parsed.continuityRisks : [],
+        recommendedLessons: Array.isArray(parsed.recommendedLessons)
+          ? parsed.recommendedLessons.map((rec) => ({
+              category: validCategories.includes(rec.category) ? rec.category : 'continuity',
+              insight: String(rec.insight || '').trim(),
+              rating: Math.max(1, Math.min(5, Math.round(Number(rec.rating) || 5))),
+            }))
+          : [],
+        localMetrics,
+        auditedAt: new Date().toISOString(),
+      };
+
+      res.json({ report });
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : 'Error auditando la secuencia.';
+      console.error('Error en /api/admin/analyze-sequence:', error);
+      res.status(500).json({ error: message });
+    }
+  });
+
+  // Microphone Dictation Transcription (for Continuity Bible & Story Notes)
+  app.post('/api/transcribe-dictation', upload.single('audio'), async (req, res) => {
+    try {
+      const file = req.file;
+      if (!file) {
+        res.status(400).json({ error: 'No se recibió audio del micrófono.' });
+        return;
+      }
+      const ai = getGenAIClient();
+      const mimeType = file.mimetype || 'audio/webm';
+      const response = await ai.models.generateContent({
+        model: 'gemini-3.5-transcribe',
+        contents: [
+          {
+            role: 'user',
+            parts: [
+              {
+                text: 'Transcribe con precisión y puntuación natural en español (o en el idioma hablado) este dictado de dirección cinematográfica para añadirlo a la biblia de continuidad o guion. Devuelve únicamente el texto transcrito limpio, sin preámbulos.',
+              },
+              {
+                inlineData: {
+                  mimeType,
+                  data: file.buffer.toString('base64'),
+                },
+              },
+            ],
+          },
+        ],
+      });
+      const transcript = (response.text ?? '').trim();
+      if (!transcript) {
+        throw new Error('No se detectó voz inteligible en la grabación.');
+      }
+      res.json({ transcript });
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : 'Error transcribiendo el dictado de voz.';
+      console.error('Error en /api/transcribe-dictation:', error);
+      res.status(500).json({ error: message });
+    }
   });
 
   // Projects CRUD (per-user folder + project.json)
@@ -718,15 +1244,28 @@ async function startServer() {
     });
   });
 
-  // Nano Image Generation (gemini-nano-banana-2.1 / gemini-3.1-flash-lite-image)
+  // Nano Image Generation (gemini-nano-banana-2.1 / gemini-3.1-flash-lite-image, 720p-4K)
   app.post('/api/generate-image', async (req, res) => {
     try {
       const userId = getRequestUserId(req);
-      const { projectId, sequenceId, frameId, prompt, aspectRatio, quality } = req.body ?? {};
+      const {
+        projectId,
+        sequenceId,
+        frameId,
+        trailerBeatId,
+        prompt,
+        aspectRatio,
+        quality,
+        resolution,
+      } = req.body ?? {};
       const pid = String(projectId || '').trim();
       const sid = String(sequenceId || '').trim();
       const fid = String(frameId || '').trim();
+      const tbid = String(trailerBeatId || '').trim();
       const visualPrompt = String(prompt || '').trim();
+      const targetRes = normalizeResolution(
+        typeof resolution === 'string' ? resolution : '4K'
+      );
 
       if (!pid || !visualPrompt) {
         res.status(400).json({ error: 'Se requiere el proyecto y el prompt visual.' });
@@ -743,20 +1282,22 @@ async function startServer() {
       const modelName =
         quality === 'lite' ? 'gemini-3.1-flash-lite-image' : 'gemini-nano-banana-2.1';
       const nanoRatio = normalizeNanoAspectRatio(String(aspectRatio || '16:9'));
+      const imageSize = getNanoImageSizeForResolution(targetRes);
+      const resolutionSpec = buildHyperRealisticResolutionSpec(targetRes);
 
       const response = await ai.models.generateContent({
         model: modelName,
         contents: {
           parts: [
             {
-              text: `${visualPrompt}\n\nPhotorealistic 65mm film still, cinematic color grading, no text overlays or watermarks.`,
+              text: `${visualPrompt}\n\n${resolutionSpec}`,
             },
           ],
         },
         config: {
           imageConfig: {
             aspectRatio: nanoRatio,
-            ...(modelName === 'gemini-nano-banana-2.1' ? { imageSize: '1K' } : {}),
+            ...(modelName === 'gemini-nano-banana-2.1' ? { imageSize } : {}),
           },
         },
       });
@@ -778,7 +1319,7 @@ async function startServer() {
       const ext = mimeType.includes('jpeg') || mimeType.includes('jpg') ? '.jpg' : '.png';
       const buffer = Buffer.from(imageBase64, 'base64');
       const saved = saveGeneratedAssetBuffer(userId, project, {
-        baseName: `nano-${fid || 'frame'}`,
+        baseName: `nano-${tbid || fid || 'frame'}-${targetRes}`,
         ext,
         mimeType,
         buffer,
@@ -804,11 +1345,24 @@ async function startServer() {
           };
           writeProjectFolder(userId, project);
         }
+      } else if (tbid && project.trailer) {
+        project = {
+          ...project,
+          trailer: {
+            ...project.trailer,
+            beats: project.trailer.beats.map((b) =>
+              b.id === tbid ? { ...b, imageUrl: saved.asset.url } : b
+            ),
+          },
+          updatedAt: new Date().toISOString(),
+        };
+        writeProjectFolder(userId, project);
       }
 
       res.json({
         imageUrl: saved.asset.url,
         model: modelName,
+        resolution: targetRes,
         project,
       });
     } catch (error) {
@@ -823,11 +1377,20 @@ async function startServer() {
   app.post('/api/generate-video', async (req, res) => {
     try {
       const userId = getRequestUserId(req);
-      const { projectId, sequenceId, frameId, prompt, aspectRatio, duration, imageUrl } =
-        req.body ?? {};
+      const {
+        projectId,
+        sequenceId,
+        frameId,
+        trailerBeatId,
+        prompt,
+        aspectRatio,
+        duration,
+        imageUrl,
+      } = req.body ?? {};
       const pid = String(projectId || '').trim();
       const sid = String(sequenceId || '').trim();
       const fid = String(frameId || '').trim();
+      const tbid = String(trailerBeatId || '').trim();
       const motionPrompt = String(prompt || '').trim();
 
       if (!pid || !motionPrompt) {
@@ -905,7 +1468,7 @@ async function startServer() {
       }
 
       const saved = saveGeneratedAssetBuffer(userId, project, {
-        baseName: `omniflash-${fid || 'clip'}`,
+        baseName: `omniflash-${tbid || fid || 'clip'}`,
         ext: '.mp4',
         mimeType,
         buffer: videoBuffer,
@@ -930,6 +1493,18 @@ async function startServer() {
           };
           writeProjectFolder(userId, project);
         }
+      } else if (tbid && project.trailer) {
+        project = {
+          ...project,
+          trailer: {
+            ...project.trailer,
+            beats: project.trailer.beats.map((b) =>
+              b.id === tbid ? { ...b, videoUrl: saved.asset.url } : b
+            ),
+          },
+          updatedAt: new Date().toISOString(),
+        };
+        writeProjectFolder(userId, project);
       }
 
       res.json({
@@ -1080,7 +1655,142 @@ Genera un informe profesional en español que capture:
     }
   });
 
-  // Full Production Generation (Book, Audio MP3/WAV/M4A/OGG, or Story)
+  // Analyze Book (PDF/TXT) or Audiobook into Sequential Chapters (1 by 1)
+  app.post('/api/analyze-chapters', upload.single('sourceFile'), async (req, res) => {
+    try {
+      const userId = getRequestUserId(req);
+      const body = req.body ?? {};
+      const projectId = String(body.projectId || '').trim();
+      const sourceType = (String(body.sourceType || 'book').trim() || 'book') as SourceMaterialType;
+      let sourceText = String(body.sourceText || '').trim();
+      const file = req.file;
+
+      if (!projectId) {
+        res.status(400).json({ error: 'Falta el identificador del proyecto.' });
+        return;
+      }
+
+      let project = readProjectById(userId, projectId);
+      if (!project) {
+        res.status(404).json({ error: 'Proyecto no encontrado.' });
+        return;
+      }
+
+      if (!file && sourceText.length < 40) {
+        res.status(400).json({
+          error: 'Adjunta un libro (PDF/TXT) o archivo de audio, o pega el texto completo para extraer sus capítulos en orden.',
+        });
+        return;
+      }
+
+      const ai = getGenAIClient();
+      const parts: Array<{ text: string } | { inlineData: { mimeType: string; data: string } }> = [];
+      let sourceAssetId: string | undefined;
+      let sourceFilename = 'Manuscrito escrito';
+
+      if (file) {
+        sourceFilename = file.originalname;
+        const saved = saveUploadedAsset(userId, project, file);
+        project = saved.updatedProject;
+        sourceAssetId = saved.asset.id;
+
+        const ext = path.extname(file.originalname).toLowerCase();
+        if (ext === '.txt' || ext === '.md' || ext === '.fountain') {
+          const decoded = file.buffer.toString('utf-8');
+          sourceText = sourceText ? `${sourceText}\n\n${decoded}` : decoded;
+        } else {
+          const mimeType = inferMimeType(file.originalname, file.mimetype);
+          parts.push({
+            inlineData: {
+              mimeType,
+              data: file.buffer.toString('base64'),
+            },
+          });
+        }
+      }
+
+      parts.push({
+        text: `Analiza íntegramente este material (${sourceFilename}) y divídelo en capítulos o bloques narrativos en estricto orden cronológico (1, 2, 3...) para producirlos uno a uno como secuencias cinematográficas.
+${sourceText ? `\nTEXTO PROPORCIONADO:\n${sourceText.slice(0, 60000)}` : ''}
+
+Devuelve entre 2 y 12 capítulos ordenados cronológicamente (index: 1, 2, 3...), cada uno con:
+- index: número entero secuencial empezando en 1
+- title: título exacto del capítulo o segmento
+- summary: sinopsis fiel y detallada de lo que ocurre en ese capítulo (2-4 frases)
+- keyCharacters: personajes principales presentes
+- estimatedStartHint: referencia de página, marca temporal o inicio del capítulo
+- sourceExcerpt: fragmento o diálogo clave literal/fiel del capítulo para guiar al guionista.`,
+      });
+
+      const response = await ai.models.generateContent({
+        model: 'gemini-4-hydrogen',
+        contents: { parts },
+        config: {
+          systemInstruction: PRODUCER_SYSTEM_INSTRUCTION,
+          responseMimeType: 'application/json',
+          responseSchema: CHAPTER_PLAN_SCHEMA,
+          thinkingConfig: { thinkingLevel: ThinkingLevel.MEDIUM },
+        },
+      });
+
+      const raw = (response.text ?? '').trim();
+      if (!raw) {
+        throw new Error('No se pudo extraer la estructura de capítulos.');
+      }
+
+      const parsed = JSON.parse(raw) as {
+        chapters?: Array<{
+          index: number;
+          title: string;
+          summary: string;
+          keyCharacters: string[];
+          estimatedStartHint: string;
+          sourceExcerpt: string;
+        }>;
+      };
+
+      const rawList = Array.isArray(parsed.chapters) ? parsed.chapters : [];
+      if (rawList.length === 0) {
+        throw new Error('El material no contiene capítulos identificables.');
+      }
+
+      const chapters: BookChapterItem[] = rawList
+        .sort((a, b) => Number(a.index || 0) - Number(b.index || 0))
+        .map((ch, idx) => ({
+          index: idx + 1,
+          title: ch.title || `Capítulo ${idx + 1}`,
+          summary: ch.summary || '',
+          keyCharacters: Array.isArray(ch.keyCharacters) ? ch.keyCharacters : [],
+          estimatedStartHint: ch.estimatedStartHint || `Bloque ${idx + 1}`,
+          sourceExcerpt: ch.sourceExcerpt || '',
+          status: 'pending',
+        }));
+
+      const chapterPlan: ChapterPlan = {
+        sourceAssetId,
+        sourceFilename,
+        sourceType,
+        createdAt: new Date().toISOString(),
+        chapters,
+      };
+
+      const updatedProject: ProductionProject = {
+        ...project,
+        chapterPlan,
+        updatedAt: new Date().toISOString(),
+      };
+      writeProjectFolder(userId, updatedProject);
+
+      res.json({ project: updatedProject, chapterPlan });
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : 'Error analizando los capítulos del material.';
+      console.error('Error en /api/analyze-chapters:', error);
+      res.status(500).json({ error: message });
+    }
+  });
+
+  // Full Production Generation (Book, Audio MP3/WAV/M4A/OGG, or Story — supports 1-by-1 chapters & 720p-4K)
   app.post('/api/produce', upload.single('sourceFile'), async (req, res) => {
     try {
       const userId = getRequestUserId(req);
@@ -1090,8 +1800,21 @@ Genera un informe profesional en español que capture:
       const sourceType = (String(body.sourceType || 'book').trim() || 'book') as SourceMaterialType;
       const directorStyle = String(body.directorStyle || 'Épica Monumental IMAX').trim();
       const aspectRatio = String(body.aspectRatio || '2.39:1').trim();
+      const targetResolution = normalizeResolution(String(body.targetResolution || '4K'));
       const thinkingDepth = String(body.thinkingDepth || 'standard').trim();
       const continuityBible = String(body.continuityBible || '').trim();
+      const sourceAssetId = String(body.sourceAssetId || '').trim();
+      const chapterIndexRaw = body.chapterIndex !== undefined ? Number(body.chapterIndex) : undefined;
+      const chapterIndex =
+        typeof chapterIndexRaw === 'number' && Number.isInteger(chapterIndexRaw) && chapterIndexRaw > 0
+          ? chapterIndexRaw
+          : undefined;
+      const chapterTotalRaw = body.chapterTotal !== undefined ? Number(body.chapterTotal) : undefined;
+      const chapterTotal =
+        typeof chapterTotalRaw === 'number' && Number.isInteger(chapterTotalRaw) && chapterTotalRaw > 0
+          ? chapterTotalRaw
+          : undefined;
+      const chapterSummary = String(body.chapterSummary || '').trim();
       let sourceText = String(body.sourceText || '').trim();
 
       if (!projectId) {
@@ -1103,18 +1826,21 @@ Genera un informe profesional en español que capture:
         return;
       }
 
+      let project = readProjectById(userId, projectId);
+      if (!project) {
+        res.status(404).json({ error: 'Proyecto no encontrado en el estudio.' });
+        return;
+      }
+
       const file = req.file;
-      if (!file && sourceText.length < 20) {
+      const storedAsset =
+        !file && sourceAssetId ? resolveProjectAssetBuffer(userId, project, sourceAssetId) : null;
+
+      if (!file && !storedAsset && sourceText.length < 20) {
         res.status(400).json({
           error:
             'Proporciona al menos 20 caracteres del texto fuente o adjunta un archivo PDF, TXT o audio.',
         });
-        return;
-      }
-
-      let project = readProjectById(userId, projectId);
-      if (!project) {
-        res.status(404).json({ error: 'Proyecto no encontrado en el estudio.' });
         return;
       }
 
@@ -1149,10 +1875,32 @@ Genera un informe profesional en español que capture:
             },
           });
         }
+      } else if (storedAsset) {
+        sourceFilename = storedAsset.asset.filename;
+        const ext = path.extname(storedAsset.asset.filename).toLowerCase();
+        if (ext === '.txt' || ext === '.md' || ext === '.fountain') {
+          const decodedText = storedAsset.buffer.toString('utf-8');
+          sourceText = sourceText
+            ? `${sourceText}\n\n--- CONTENIDO DEL ARCHIVO (${storedAsset.asset.filename}) ---\n${decodedText}`
+            : decodedText;
+        } else {
+          const mimeType = storedAsset.asset.mimeType;
+          isAudioUpload = storedAsset.asset.kind === 'audio';
+          if (isAudioUpload) {
+            verbatimTranscript = await transcribeAudioWithGemini(ai, storedAsset.buffer, mimeType);
+          }
+          parts.push({
+            inlineData: {
+              mimeType,
+              data: storedAsset.buffer.toString('base64'),
+            },
+          });
+        }
       }
 
       const lessons = ensureLearningMemory(userId);
       const learningContext = buildLearningPromptContext(lessons, 8);
+      const resolutionSpec = buildHyperRealisticResolutionSpec(targetResolution);
 
       const audioInstructions = isAudioUpload
         ? `\nMATERIAL DE AUDIO DETECTADO (${sourceFilename}):
@@ -1160,11 +1908,20 @@ Transcripción inicial capturada: ${verbatimTranscript || '[Escucha directamente
 OBLIGATORIO: Completa el bloque "audioAnalysis" en el JSON con: transcription (transcripción completa), narrationStyle, emotionalArc, rhythmAndPacing, detectedSoundEffects y directingRecommendations.`
         : '';
 
+      const chapterDirective = chapterIndex
+        ? `\nPRODUCCIÓN SECUENCIAL CAPÍTULO A CAPÍTULO (ORDEN ESTRICTO):
+Estás dirigiendo específicamente el Capítulo ${chapterIndex}${chapterTotal ? ` de ${chapterTotal}` : ''}: "${sequenceTitle}".
+${chapterSummary ? `Sinopsis del capítulo a adaptar: ${chapterSummary}` : ''}
+Extrae e interpreta exclusivamente los acontecimientos, diálogos, escenografía y ritmo de este capítulo manteniendo continuidad exacta con los capítulos anteriores.`
+        : '';
+
       const promptText = `PRODUCCIÓN ACTIVA: ${project.title}
 SECUENCIA / CAPÍTULO: ${sequenceTitle}
 TIPO DE MATERIAL FUENTE: ${sourceType === 'audiobook' ? 'Audiolibro / Relato Narrado' : sourceType === 'book' ? 'Libro / Manuscrito Literario' : 'Historia Original / Sinopsis'}
 ESTILO CINEMATOGRÁFICO OBJETIVO: ${directorStyle}
 RELACIÓN DE ASPECTO OBJETIVO: ${aspectRatio}
+RESOLUCIÓN Y ULTRA DEFINICIÓN OBJETIVO: ${targetResolution} (${resolutionSpec})
+${chapterDirective}
 
 MEMORIA DE AUTOAPRENDIZAJE Y MEJORA DEL ESTUDIO:
 ${learningContext}
@@ -1176,7 +1933,12 @@ ${audioInstructions}
 MATERIAL FUENTE ESCRITO / NOTAS DEL CLIENTE:
 ${sourceText || '[El material fuente principal está adjunto como archivo binario PDF o Audio. Procésalo íntegramente.]'}
 
-Genera el expediente completo de dirección en JSON estructurado siguiendo el esquema solicitado. Incluye al menos 4 planos en shotList, al menos 1 escena detallada con múltiples beats (action, camera, sound, dialogue) en screenplay, y 3 tarjetas de storyboardFrames.`;
+Genera el expediente completo de dirección en JSON estructurado siguiendo el esquema solicitado:
+- "hyperRealisticPrompt": Prompt cinematográfico maestro hiperrealista en inglés calibrado a ultra definición ${targetResolution} con cámara, óptica, escenografía, textura PBR y luz Kelvin.
+- "shotList": Todos los planos necesarios (al menos 6 planos detallados) para cubrir completamente la secuencia.
+- "voiceOverTracks": Al menos 2 pistas de voz en off realistas (narración y/o monólogo interior) con "voicePreset" elegido entre Charon, Kore, Fenrir, Puck o Zephyr, "deliveryDirection" actoral y "timecodeHint".
+- "screenplay": Escenas completas con múltiples beats (action, camera, sound, dialogue).
+- "storyboardFrames": Al menos 3 tarjetas con prompts visuales hiperrealistas en inglés calibrados a ${targetResolution}.`;
 
       parts.push({ text: promptText });
 
@@ -1184,7 +1946,7 @@ Genera el expediente completo de dirección en JSON estructurado siguiendo el es
         model: 'gemini-4-hydrogen',
         contents: { parts },
         config: {
-          systemInstruction: PRODUCER_SYSTEM_INSTRUCTION,
+          systemInstruction: buildEffectiveProducerInstruction(lessons),
           responseMimeType: 'application/json',
           responseSchema: PRODUCTION_RESPONSE_SCHEMA,
           thinkingConfig: {
@@ -1217,14 +1979,33 @@ Genera el expediente completo de dirección en JSON estructurado siguiendo el es
       }
 
       const now = new Date().toISOString();
+      const seqId = `seq-${Date.now().toString(36)}`;
+      const voiceOverTracks: VoiceOverTrack[] = Array.isArray(parsed.voiceOverTracks)
+        ? parsed.voiceOverTracks.map((vo: Record<string, string>, idx: number) => ({
+            id: `vo-${Date.now().toString(36)}-${idx}`,
+            characterOrNarrator: vo.characterOrNarrator || 'Narrador',
+            voicePersona: vo.voicePersona || 'Voz cinematográfica realista',
+            voicePreset: normalizeVoicePreset(vo.voicePreset),
+            deliveryDirection: vo.deliveryDirection || 'Tono contenido, íntimo y cinematográfico',
+            timecodeHint: vo.timecodeHint || `00:${String(idx * 12).padStart(2, '0')}`,
+            text: vo.text || '',
+          }))
+        : [];
+
       const createdSequence: ProductionSequence = {
-        id: `seq-${Date.now().toString(36)}`,
+        id: seqId,
         title: sequenceTitle,
         versionStatus: 'draft',
         sourceType,
         sourceFilename,
         directorStyle,
         aspectRatio,
+        targetResolution,
+        hyperRealisticPrompt:
+          parsed.hyperRealisticPrompt ||
+          `${parsed.directorVision || ''}. ${resolutionSpec}`.trim(),
+        chapterIndex,
+        chapterTotal,
         cameraSystem: parsed.cameraSystem || 'ARRI Alexa 65',
         lensPackage: parsed.lensPackage || 'Cooke Anamorphic /i',
         filmStockOrLut: parsed.filmStockOrLut || 'Kodak 2383 Print LUT',
@@ -1234,6 +2015,7 @@ Genera el expediente completo de dirección en JSON estructurado siguiendo el es
         lighting: parsed.lighting,
         shotList: Array.isArray(parsed.shotList) ? parsed.shotList : [],
         soundDesign: parsed.soundDesign,
+        voiceOverTracks,
         audioAnalysis,
         vfx: parsed.vfx,
         screenplay: Array.isArray(parsed.screenplay) ? parsed.screenplay : [],
@@ -1259,9 +2041,15 @@ Genera el expediente completo de dirección en JSON estructurado siguiendo el es
         createdSequence.continuitySummary
       );
 
+      const updatedChapterPlan =
+        chapterIndex && project.chapterPlan
+          ? markChapterCompleted(project.chapterPlan, chapterIndex, seqId)
+          : project.chapterPlan;
+
       const updatedProject: ProductionProject = {
         ...project,
         continuityBible: updatedBible,
+        chapterPlan: updatedChapterPlan,
         updatedAt: now,
         sequences: [createdSequence, ...project.sequences],
       };
@@ -1276,6 +2064,536 @@ Genera el expediente completo de dirección en JSON estructurado siguiendo el es
       const message =
         error instanceof Error ? error.message : 'Error inesperado al producir la secuencia.';
       console.error('Error en /api/produce:', error);
+      res.status(500).json({ error: message });
+    }
+  });
+
+  // Realistic Voice-Over Generation (gemini-3.8-flash-tts -> WAV)
+  app.post('/api/generate-voiceover', async (req, res) => {
+    try {
+      const userId = getRequestUserId(req);
+      const { projectId, sequenceId, trackId, target, text, voicePreset, deliveryDirection } =
+        req.body ?? {};
+      const pid = String(projectId || '').trim();
+      const sid = String(sequenceId || '').trim();
+      const tid = String(trackId || '').trim();
+      const scriptText = String(text || '').trim();
+      const preset = normalizeVoicePreset(
+        typeof voicePreset === 'string' ? voicePreset : 'Charon'
+      );
+      const style = String(
+        deliveryDirection || 'Cinematic Hollywood voice-over narration, measured dramatic pacing'
+      ).trim();
+
+      if (!pid || !scriptText) {
+        res.status(400).json({ error: 'Se requiere el proyecto y el texto de voz en off.' });
+        return;
+      }
+
+      let project = readProjectById(userId, pid);
+      if (!project) {
+        res.status(404).json({ error: 'Proyecto no encontrado.' });
+        return;
+      }
+
+      const ai = getGenAIClient();
+      const response = await ai.models.generateContent({
+        model: 'gemini-3.8-flash-tts',
+        contents: [
+          {
+            role: 'user',
+            parts: [
+              {
+                text: scriptText,
+                speechMetadata: {
+                  style,
+                },
+              },
+            ],
+          },
+        ],
+        config: {
+          responseModalities: ['AUDIO'],
+          speechConfig: {
+            voiceConfig: {
+              prebuiltVoiceConfig: { voiceName: preset },
+            },
+          },
+        },
+      });
+
+      const base64Audio = response.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data;
+      if (!base64Audio) {
+        throw new Error('El motor de voz en off no devolvió audio WAV.');
+      }
+
+      const wavBuffer = Buffer.from(base64Audio, 'base64');
+      const saved = saveGeneratedAssetBuffer(userId, project, {
+        baseName: `voiceover-${target === 'trailer' ? 'trailer' : tid || 'vo'}`,
+        ext: '.wav',
+        mimeType: 'audio/wav',
+        buffer: wavBuffer,
+        kind: 'audio',
+      });
+      project = saved.updatedProject;
+
+      if (target === 'trailer' && project.trailer) {
+        project = {
+          ...project,
+          trailer: {
+            ...project.trailer,
+            voiceOverAudioUrl: saved.asset.url,
+          },
+          updatedAt: new Date().toISOString(),
+        };
+        writeProjectFolder(userId, project);
+      } else if (sid && tid) {
+        const seqIdx = project.sequences.findIndex((s) => s.id === sid);
+        if (seqIdx !== -1) {
+          const seq = project.sequences[seqIdx];
+          const nextTracks = (seq.voiceOverTracks || []).map((tr) =>
+            tr.id === tid ? { ...tr, audioUrl: saved.asset.url } : tr
+          );
+          project = {
+            ...project,
+            sequences: project.sequences.map((s, idx) =>
+              idx === seqIdx
+                ? { ...s, voiceOverTracks: nextTracks, updatedAt: new Date().toISOString() }
+                : s
+            ),
+            updatedAt: new Date().toISOString(),
+          };
+          writeProjectFolder(userId, project);
+        }
+      }
+
+      res.json({
+        audioUrl: saved.asset.url,
+        project,
+      });
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : 'Error generando la voz en off realista.';
+      console.error('Error en /api/generate-voiceover:', error);
+      res.status(500).json({ error: message });
+    }
+  });
+
+  // 30-Second Cinematic Trailer Generator (based on Continuity Bible + Approved Sequences)
+  app.post('/api/generate-trailer', async (req, res) => {
+    try {
+      const userId = getRequestUserId(req);
+      const { projectId, tone, targetResolution, voicePreset } = req.body ?? {};
+      const pid = String(projectId || '').trim();
+      if (!pid) {
+        res.status(400).json({ error: 'Falta el identificador del proyecto.' });
+        return;
+      }
+
+      const project = readProjectById(userId, pid);
+      if (!project) {
+        res.status(404).json({ error: 'Proyecto no encontrado.' });
+        return;
+      }
+
+      const approvedSequences = project.sequences.filter(
+        (seq) => seq.versionStatus === 'final'
+      );
+      if (approvedSequences.length === 0) {
+        res.status(400).json({
+          error:
+            'Debes aprobar al menos una secuencia en Versión Final para generar el tráiler de 30 segundos.',
+        });
+        return;
+      }
+
+      const resolution = normalizeResolution(
+        typeof targetResolution === 'string' ? targetResolution : '4K'
+      );
+      const chosenTone = String(tone || 'Teaser Épico Monumental').trim();
+      const chosenVoice = normalizeVoicePreset(
+        typeof voicePreset === 'string' ? voicePreset : 'Charon'
+      );
+
+      const scenesSummary = approvedSequences
+        .map((seq, idx) => {
+          const dialogueSample = (seq.screenplay || [])
+            .flatMap((sc) => sc.beats)
+            .filter((b) => b.type === 'dialogue')
+            .slice(0, 3)
+            .map((b) => `${b.character || 'PERSONAJE'}: "${b.text}"`)
+            .join(' | ');
+          return `ESCENA APROBADA ${idx + 1}:
+- ID: ${seq.id}
+- Título: ${seq.title}
+- Cámara / Formato: ${seq.cameraSystem} (${seq.aspectRatio})
+- Logline: ${seq.logline}
+- Visión: ${seq.directorVision}
+- Clima Sonoro: ${seq.soundDesign?.musicalScore || ''} (${seq.soundDesign?.tempoBpm || 80} BPM)
+- Diálogos clave: ${dialogueSample || 'Ninguno'}
+- Continuidad: ${seq.continuitySummary}`;
+        })
+        .join('\n\n');
+
+      const ai = getGenAIClient();
+      const response = await ai.models.generateContent({
+        model: 'gemini-4-hydrogen',
+        contents: `Eres el Agente Director de Tráilers de AUTEUR Studio. Diseña un TRÁILER CINEMATOGRÁFICO OFICIAL DE EXACTAMENTE 30 SEGUNDOS (00:00 a 00:30) para el proyecto "${project.title}" (${project.genreStyle}).
+
+TONO DEL TRÁILER: ${chosenTone}
+RESOLUCIÓN MAESTRA OBJETIVO: ${resolution} (${buildHyperRealisticResolutionSpec(resolution)})
+VOZ EN OFF PRINCIPAL: ${chosenVoice}
+
+BIBLIA DE CONTINUIDAD OFICIAL DEL PROYECTO:
+${project.continuityBible || 'Mantener absoluta fidelidad tonal y estética con las escenas aprobadas.'}
+
+ESCENAS YA APROBADAS (VERSIÓN FINAL):
+${scenesSummary}
+
+INSTRUCCIONES DE MONTAJE DE 30 SEGUNDOS:
+1. Estructura exactamente 6 cortes ("beats") cuya suma de "durationSec" sea 30 segundos exactos (por ejemplo 5s + 5s + 5s + 5s + 5s + 5s, o crescendo 6s + 5s + 5s + 5s + 5s + 4s).
+2. Cada beat debe referenciar el "sourceSequenceId" y "sourceSequenceTitle" de una de las escenas aprobadas.
+3. Redacta "hyperRealisticPrompt" y "motionPrompt" en inglés con calidad hiperrealista ${resolution} (cámara, lente, luz Kelvin, escenografía, atmósfera).
+4. Redacta un "voiceOverScript" completo en español que dure ~22-26 segundos hablados y coordina las líneas por beat ("voiceOverLine") y rótulos en pantalla ("onScreenTitleCard") junto con "sfxCue" y "editingTransition" (ej. Smash Cut, LFE Boom, Riser).
+5. En "musicPrompt", describe en inglés la partitura cinematográfica de 30 segundos para Lyria (tempo, instrumentación, crescendo y clímax en el segundo 24).`,
+        config: {
+          systemInstruction: buildEffectiveProducerInstruction(ensureLearningMemory(userId)),
+          responseMimeType: 'application/json',
+          responseSchema: TRAILER_RESPONSE_SCHEMA,
+          thinkingConfig: { thinkingLevel: ThinkingLevel.HIGH },
+        },
+      });
+
+      const raw = (response.text ?? '').trim();
+      if (!raw) {
+        throw new Error('El Agente Director no devolvió el diseño del tráiler.');
+      }
+      const parsed = JSON.parse(raw);
+
+      const normalizedBeats = normalizeTrailerBeats(
+        Array.isArray(parsed.beats) ? parsed.beats : [],
+        approvedSequences
+      );
+
+      const trailer: ProjectTrailer = {
+        id: `trailer-${Date.now().toString(36)}`,
+        title: parsed.title || `${project.title} — Tráiler Oficial (30s)`,
+        tagline: parsed.tagline || 'Muy pronto en cines',
+        tone: chosenTone,
+        targetResolution: resolution,
+        totalDurationSec: 30,
+        voicePreset: chosenVoice,
+        voiceDirection:
+          parsed.voiceDirection || 'Voz cinematográfica profunda con crescendo dramático',
+        voiceOverScript: parsed.voiceOverScript || '',
+        musicPrompt:
+          parsed.musicPrompt ||
+          '30-second epic Hollywood trailer orchestral score with sub-bass braams, tense strings ostinato, and dramatic percussion climax at 24s.',
+        tempoBpm: Number(parsed.tempoBpm) || 110,
+        soundMixNotes: parsed.soundMixNotes || 'Dolby Atmos trailer master con subgraves LFE 28Hz.',
+        approvedSequenceIds: approvedSequences.map((s) => s.id),
+        beats: normalizedBeats,
+        createdAt: new Date().toISOString(),
+      };
+
+      const updatedProject: ProductionProject = {
+        ...project,
+        trailer,
+        updatedAt: new Date().toISOString(),
+      };
+      writeProjectFolder(userId, updatedProject);
+
+      res.json({ trailer, project: updatedProject });
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : 'Error generando el tráiler cinematográfico.';
+      console.error('Error en /api/generate-trailer:', error);
+      res.status(500).json({ error: message });
+    }
+  });
+
+  // 30-Second Trailer Music Score via Lyria Clip (lyria-3-clip-preview)
+  app.post('/api/generate-trailer-music', async (req, res) => {
+    try {
+      const userId = getRequestUserId(req);
+      const { projectId, musicPrompt } = req.body ?? {};
+      const pid = String(projectId || '').trim();
+      if (!pid) {
+        res.status(400).json({ error: 'Falta el identificador del proyecto.' });
+        return;
+      }
+
+      let project = readProjectById(userId, pid);
+      if (!project || !project.trailer) {
+        res.status(404).json({ error: 'Genera primero la estructura del tráiler de 30s.' });
+        return;
+      }
+
+      const prompt = String(musicPrompt || project.trailer.musicPrompt || '').trim();
+      if (!prompt) {
+        res.status(400).json({ error: 'Se requiere un prompt musical para el tráiler.' });
+        return;
+      }
+
+      const ai = getGenAIClient();
+      const responseStream = await ai.models.generateContentStream({
+        model: 'lyria-3-clip-preview',
+        contents: prompt,
+      });
+
+      const audioChunks: Buffer[] = [];
+      let mimeType = 'audio/mpeg';
+
+      for await (const chunk of responseStream) {
+        const parts = chunk.candidates?.[0]?.content?.parts;
+        if (!parts) continue;
+        for (const part of parts) {
+          if (part.inlineData?.data) {
+            if (audioChunks.length === 0 && part.inlineData.mimeType) {
+              mimeType = part.inlineData.mimeType;
+            }
+            audioChunks.push(Buffer.from(part.inlineData.data, 'base64'));
+          }
+        }
+      }
+
+      if (audioChunks.length === 0) {
+        throw new Error('Lyria no devolvió pistas de audio para el tráiler.');
+      }
+
+      const audioBuffer = Buffer.concat(audioChunks);
+      const ext = mimeType.includes('wav') ? '.wav' : '.mp3';
+      const saved = saveGeneratedAssetBuffer(userId, project, {
+        baseName: 'trailer-score-30s',
+        ext,
+        mimeType,
+        buffer: audioBuffer,
+        kind: 'audio',
+      });
+
+      project = {
+        ...saved.updatedProject,
+        trailer: {
+          ...project.trailer,
+          musicAudioUrl: saved.asset.url,
+        },
+        updatedAt: new Date().toISOString(),
+      };
+      writeProjectFolder(userId, project);
+
+      res.json({ audioUrl: saved.asset.url, project });
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : 'Error generando música de 30s con Lyria.';
+      console.error('Error en /api/generate-trailer-music:', error);
+      res.status(500).json({ error: message });
+    }
+  });
+
+  // Auto-generate 4 Key Storyboard Frames for the active sequence (Continuity Bible + Screenplay + Nano Render)
+  app.post('/api/generate-storyboard-frames', async (req, res) => {
+    try {
+      const userId = getRequestUserId(req);
+      const { projectId, sequenceId, resolution, renderImages } = req.body ?? {};
+      const pid = String(projectId || '').trim();
+      const sid = String(sequenceId || '').trim();
+
+      if (!pid || !sid) {
+        res.status(400).json({ error: 'Se requiere proyecto y secuencia activa.' });
+        return;
+      }
+
+      let project = readProjectById(userId, pid);
+      if (!project) {
+        res.status(404).json({ error: 'Proyecto no encontrado.' });
+        return;
+      }
+      const seqIdx = project.sequences.findIndex((s) => s.id === sid);
+      if (seqIdx === -1) {
+        res.status(404).json({ error: 'Secuencia activa no encontrada.' });
+        return;
+      }
+
+      const sequence = project.sequences[seqIdx];
+      const targetRes = normalizeResolution(
+        typeof resolution === 'string' ? resolution : sequence.targetResolution || '4K'
+      );
+      const resSpec = buildHyperRealisticResolutionSpec(targetRes);
+      const lessons = ensureLearningMemory(userId);
+      const ai = getGenAIClient();
+
+      const screenplayText = (sequence.screenplay || [])
+        .map(
+          (sc) =>
+            `ESCENA ${sc.sceneNumber}: ${sc.slugline} (${sc.timeOfDay})\n` +
+            sc.beats
+              .map(
+                (b) =>
+                  `- [${b.type.toUpperCase()}]${b.character ? ` ${b.character}` : ''}: ${b.text}`
+              )
+              .join('\n')
+        )
+        .join('\n\n')
+        .slice(0, 6000);
+
+      const shotsSummary = (sequence.shotList || [])
+        .map(
+          (sh) =>
+            `${sh.shotNumber} | ${sh.shotType} | ${sh.lensMm} | ${sh.movement} | ${sh.framingNote}`
+        )
+        .join('\n');
+
+      const paletteSummary = (sequence.colorPalette || [])
+        .map((c) => `${c.name} (${c.hex}: ${c.role})`)
+        .join(', ');
+
+      const directorPrompt = `Eres el Agente Director y Director de Fotografía de AUTEUR Studio.
+Genera EXACTAMENTE 4 FRAMES DE STORYBOARD CLAVE para la secuencia activa, respetando con fidelidad absoluta la BIBLIA DE CONTINUIDAD y el GUION TÉCNICO.
+
+PROYECTO: ${project.title} (${project.genreStyle})
+SECUENCIA ACTIVA: ${sequence.title}
+CÁMARA Y ÓPTICA MAESTRA: ${sequence.cameraSystem} · ${sequence.lensPackage} · ${sequence.filmStockOrLut}
+RELACIÓN DE ASPECTO: ${sequence.aspectRatio}
+RESOLUCIÓN OBJETIVO: ${targetRes} (${resSpec})
+PALETA OFICIAL: ${paletteSummary || 'Según biblia de continuidad'}
+ILUMINACIÓN KELVIN: ${sequence.lighting?.keyLight || ''} · ${sequence.lighting?.colorTemperatureKelvin || ''} · ${sequence.lighting?.atmosphereAndHaze || ''}
+
+BIBLIA DE CONTINUIDAD DEL PROYECTO:
+${project.continuityBible || 'Mantener coherencia estricta de personajes, vestuario, escenografía y colorimetría.'}
+
+LISTA DE PLANOS DE REFERENCIA:
+${shotsSummary || 'Planos maestros de la secuencia'}
+
+GUION TÉCNICO COMPLETO DE LA SECUENCIA:
+${screenplayText || sequence.directorVision || sequence.logline}
+
+REQUISITOS OBLIGATORIOS PARA LOS 4 FRAMES:
+1. Frame 1 (Establecimiento y Atmósfera): abre la secuencia definiendo espacio, luz Kelvin y escala escenográfica.
+2. Frame 2 (Desarrollo / Tensión dramática): introduce el conflicto o acción clave del guion técnico.
+3. Frame 3 (Clímax emocional o visual): el momento de mayor intensidad de la secuencia.
+4. Frame 4 (Punto de giro o cierre): imagen conclusiva con resonancia dramática y continuidad hacia la siguiente escena.
+5. Para cada frame incluye:
+   - "title": título en español conciso y dramático
+   - "shotRef": referencia exacta de plano (ej. "Plano 1A")
+   - "cameraSpec": cámara, óptica en mm y apertura
+   - "visualPrompt": prompt fotográfico hiperrealista en INGLÉS adaptado a ${targetRes}, describiendo vestuario exacto, rasgos de la Biblia de Continuidad, iluminación en Kelvin, atmósfera y textura PBR (sin texto superpuesto).
+   - "veoMotionPrompt": prompt en INGLÉS de movimiento de cámara fluido para Omni Flash.`;
+
+      const dirResponse = await ai.models.generateContent({
+        model: 'gemini-4-hydrogen',
+        contents: directorPrompt,
+        config: {
+          systemInstruction: buildEffectiveProducerInstruction(lessons),
+          responseMimeType: 'application/json',
+          responseSchema: STORYBOARD_4_FRAMES_SCHEMA,
+          thinkingConfig: { thinkingLevel: ThinkingLevel.HIGH },
+        },
+      });
+
+      const raw = (dirResponse.text ?? '').trim();
+      if (!raw) {
+        throw new Error('El Agente Director no devolvió los 4 frames de storyboard.');
+      }
+
+      const parsed = JSON.parse(raw) as { frames?: Array<Partial<StoryboardCard>> };
+      const normalizedFrames = normalizeFourKeyStoryboardFrames(
+        Array.isArray(parsed.frames) ? parsed.frames : [],
+        {
+          sequence,
+          resolution: targetRes,
+        }
+      );
+
+      const shouldRenderImages = renderImages !== false;
+      const nanoRatio = normalizeNanoAspectRatio(sequence.aspectRatio || '16:9');
+      const imageSize = getNanoImageSizeForResolution(targetRes);
+      const imageWarnings: string[] = [];
+      let renderedCount = 0;
+
+      if (shouldRenderImages) {
+        const finalFrames: StoryboardCard[] = [];
+        for (const frame of normalizedFrames) {
+          try {
+            const imgRes = await ai.models.generateContent({
+              model: 'gemini-nano-banana-2.1',
+              contents: {
+                parts: [
+                  {
+                    text: `${frame.visualPrompt}\n\n${resSpec}`,
+                  },
+                ],
+              },
+              config: {
+                imageConfig: {
+                  aspectRatio: nanoRatio,
+                  imageSize,
+                },
+              },
+            });
+
+            let imageBase64 = '';
+            let mimeType = 'image/png';
+            for (const part of imgRes.candidates?.[0]?.content?.parts ?? []) {
+              if (part.inlineData?.data) {
+                imageBase64 = part.inlineData.data;
+                mimeType = part.inlineData.mimeType || 'image/png';
+                break;
+              }
+            }
+
+            if (imageBase64) {
+              const ext = mimeType.includes('jpeg') || mimeType.includes('jpg') ? '.jpg' : '.png';
+              const buffer = Buffer.from(imageBase64, 'base64');
+              const saved = saveGeneratedAssetBuffer(userId, project, {
+                baseName: `sb4-${frame.id}-${targetRes}`,
+                ext,
+                mimeType,
+                buffer,
+                kind: 'image',
+              });
+              project = saved.updatedProject;
+              renderedCount += 1;
+              finalFrames.push({ ...frame, imageUrl: saved.asset.url });
+            } else {
+              imageWarnings.push(`${frame.title}: Nano no devolvió imagen.`);
+              finalFrames.push(frame);
+            }
+          } catch (imgErr) {
+            const msg = imgErr instanceof Error ? imgErr.message : 'Error de renderizado Nano';
+            imageWarnings.push(`${frame.title}: ${msg}`);
+            finalFrames.push(frame);
+          }
+        }
+        normalizedFrames.splice(0, normalizedFrames.length, ...finalFrames);
+      }
+
+      const now = new Date().toISOString();
+      const updatedSeq: ProductionSequence = {
+        ...sequence,
+        targetResolution: targetRes,
+        storyboardFrames: normalizedFrames,
+        updatedAt: now,
+      };
+      project = {
+        ...project,
+        sequences: project.sequences.map((s, idx) => (idx === seqIdx ? updatedSeq : s)),
+        updatedAt: now,
+      };
+      writeProjectFolder(userId, project);
+
+      res.json({
+        project,
+        sequence: updatedSeq,
+        frames: normalizedFrames,
+        renderedCount,
+        imageWarnings,
+      });
+    } catch (error) {
+      const message =
+        error instanceof Error
+          ? error.message
+          : 'Error auto-generando los 4 frames de storyboard.';
+      console.error('Error en /api/generate-storyboard-frames:', error);
       res.status(500).json({ error: message });
     }
   });

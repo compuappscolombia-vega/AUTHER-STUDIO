@@ -1,4 +1,4 @@
-import { UserCheck, LogIn } from 'lucide-react';
+import { UserCheck, LogIn, UserCog } from 'lucide-react';
 import type { WorkspaceTab } from '../types/studio';
 
 interface TopBarProps {
@@ -6,6 +6,8 @@ interface TopBarProps {
   onTabChange: (tab: WorkspaceTab) => void;
   onOpenNewProject: () => void;
   onOpenAuth: () => void;
+  onOpenAdminLab?: () => void;
+  isAdmin?: boolean;
   userLabel: string | null;
   onToggleMobileMenu: () => void;
 }
@@ -15,6 +17,7 @@ const NAV_TABS: { id: WorkspaceTab; label: string }[] = [
   { id: 'shots', label: 'Planos y Sonido' },
   { id: 'screenplay', label: 'Guion' },
   { id: 'storyboard', label: 'Storyboard' },
+  { id: 'trailer', label: 'Tráiler 30s' },
 ];
 
 export function TopBar({
@@ -22,11 +25,13 @@ export function TopBar({
   onTabChange,
   onOpenNewProject,
   onOpenAuth,
+  onOpenAdminLab,
+  isAdmin = false,
   userLabel,
   onToggleMobileMenu,
 }: TopBarProps) {
   return (
-    <header className="h-16 border-b border-white/10 bg-[#0B0B0E] px-3 sm:px-4 lg:px-6 flex items-center justify-between gap-2 md:gap-8 shrink-0">
+    <header className="h-16 border-b border-white/10 bg-[#0B0B0E] px-3 sm:px-4 lg:px-6 flex items-center justify-between gap-2 md:gap-4 shrink-0">
       {/* Zone 1: Brand Wordmark */}
       <div className="flex items-center gap-2 sm:gap-3 min-w-0 shrink-0">
         <button
@@ -50,7 +55,7 @@ export function TopBar({
       </div>
 
       {/* Zone 2: Primary Workspace Navigation */}
-      <nav aria-label="Vistas del estudio" className="hidden md:flex items-center gap-6">
+      <nav aria-label="Vistas del estudio" className="hidden md:flex items-center gap-4 lg:gap-6">
         {NAV_TABS.map((tab) => {
           const active = activeTab === tab.id;
           return (
@@ -73,6 +78,18 @@ export function TopBar({
 
       {/* Zone 3: Auth & Primary Action */}
       <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
+        {isAdmin && onOpenAdminLab && (
+          <button
+            type="button"
+            onClick={onOpenAdminLab}
+            aria-label="Abrir Laboratorio Administrador del Agente"
+            className="hidden sm:inline-flex items-center gap-1.5 px-2.5 py-1.5 sm:py-2 rounded-lg border border-[#E5A93C]/45 bg-[#1B1710] hover:bg-[#272116] text-xs font-semibold text-[#E5A93C] transition-colors whitespace-nowrap shrink-0"
+          >
+            <UserCog className="w-3.5 h-3.5 shrink-0" />
+            <span>Lab Agente</span>
+          </button>
+        )}
+
         <button
           type="button"
           onClick={onOpenAuth}
@@ -82,7 +99,7 @@ export function TopBar({
           {userLabel ? (
             <>
               <UserCheck className="w-3.5 h-3.5 text-[#38B2AC] shrink-0" />
-              <span className="hidden sm:inline max-w-[110px] truncate">{userLabel}</span>
+              <span className="hidden sm:inline max-w-[115px] truncate">{userLabel}</span>
             </>
           ) : (
             <>

@@ -1,4 +1,4 @@
-import { Search, FolderPlus, Layers, Brain, X } from 'lucide-react';
+import { Search, FolderPlus, Layers, Brain, Sliders, UserCog, X } from 'lucide-react';
 import type { ProductionProject } from '../types/studio';
 import {
   computeProjectStats,
@@ -11,11 +11,14 @@ interface ProjectSidebarProps {
   activeProjectId: string;
   searchQuery: string;
   lessonsCount: number;
+  isAdmin?: boolean;
   onSearchChange: (q: string) => void;
   onSelectProject: (id: string) => void;
   onOpenNewProject: () => void;
   onOpenAgentBlueprint: () => void;
+  onOpenAdminLab: () => void;
   onOpenLearning: () => void;
+  onOpenSettings: () => void;
   mobileOpen: boolean;
   onCloseMobile: () => void;
 }
@@ -25,11 +28,14 @@ export function ProjectSidebar({
   activeProjectId,
   searchQuery,
   lessonsCount,
+  isAdmin = false,
   onSearchChange,
   onSelectProject,
   onOpenNewProject,
   onOpenAgentBlueprint,
+  onOpenAdminLab,
   onOpenLearning,
+  onOpenSettings,
   mobileOpen,
   onCloseMobile,
 }: ProjectSidebarProps) {
@@ -147,6 +153,27 @@ export function ProjectSidebar({
         <button
           type="button"
           onClick={() => {
+            onOpenAdminLab();
+            onCloseMobile();
+          }}
+          className={`w-full flex items-center justify-between gap-2 px-3 py-2.5 rounded-lg border text-xs font-medium transition-colors whitespace-nowrap ${
+            isAdmin
+              ? 'border-[#E5A93C]/50 bg-[#1B1710] hover:bg-[#272116] text-[#F2F0EB]'
+              : 'border-white/10 bg-[#15151C] hover:bg-[#1C1C26] text-[#E6E2DA]'
+          }`}
+        >
+          <span className="inline-flex items-center gap-2">
+            <UserCog className="w-3.5 h-3.5 text-[#E5A93C]" />
+            <span>Laboratorio Admin</span>
+          </span>
+          <span className="font-mono-tech text-[10px] text-[#E5A93C]">
+            {isAdmin ? 'ACTIVO' : 'Agente'}
+          </span>
+        </button>
+
+        <button
+          type="button"
+          onClick={() => {
             onOpenLearning();
             onCloseMobile();
           }}
@@ -171,6 +198,18 @@ export function ProjectSidebar({
         >
           <Layers className="w-3.5 h-3.5 text-[#E5A93C]" />
           <span>Plantilla Agent Studio</span>
+        </button>
+
+        <button
+          type="button"
+          onClick={() => {
+            onOpenSettings();
+            onCloseMobile();
+          }}
+          className="w-full flex items-center justify-center gap-2 px-3 py-2.5 rounded-lg border border-white/10 bg-[#15151C] hover:bg-[#1C1C26] text-xs font-medium text-[#E6E2DA] transition-colors whitespace-nowrap"
+        >
+          <Sliders className="w-3.5 h-3.5 text-[#E5A93C]" />
+          <span>Configuración</span>
         </button>
       </div>
     </div>

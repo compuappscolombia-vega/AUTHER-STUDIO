@@ -1,15 +1,18 @@
 import { useState, useEffect } from 'react';
-import { Check, Copy, Film, ImagePlus, Maximize2, Video, X } from 'lucide-react';
+import { Check, Copy, Film, ImagePlus, Maximize2, Sparkles, Video, X } from 'lucide-react';
 import type {
   ProductionProject,
   ProductionSequence,
+  ResolutionTier,
   StoryboardCard,
 } from '../types/studio';
+import { RESOLUTION_OPTIONS, normalizeResolution } from '../utils/productionPipeline';
 
 interface StoryboardViewProps {
   userId: string;
   projectId: string;
   sequence: ProductionSequence;
+  defaultResolution?: ResolutionTier;
   onProjectMediaUpdated: (project: ProductionProject) => Promise<void>;
 }
 
@@ -17,14 +20,20 @@ export function StoryboardView({
   userId,
   projectId,
   sequence,
+  defaultResolution = '4K',
   onProjectMediaUpdated,
 }: StoryboardViewProps) {
   const [activeCardId, setActiveCardId] = useState<string | null>(null);
+  const [selectedResolution, setSelectedResolution] = useState<ResolutionTier>(
+    normalizeResolution(sequence.targetResolution || defaultResolution)
+  );
   const [brokenImages, setBrokenImages] = useState<Record<string, boolean>>({});
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [generatingImgId, setGeneratingImgId] = useState<string | null>(null);
   const [generatingVidId, setGeneratingVidId] = useState<string | null>(null);
+  const [autoGenerating4, setAutoGenerating4] = useState(false);
   const [mediaMode, setMediaMode] = useState<Record<string, 'image' | 'video'>>({});
+  const [mediaNotice, setMediaNotice] = useState<string | null>(null);
   const [mediaError, setMediaError] = useState<string | null>(null);
 
   const activeCard: StoryboardCard | null =
@@ -50,6 +59,56 @@ export function StoryboardView({
     }
   }
 
+  async function handleAutoGenerate4Frames() {
+    setAutoGenerating4(true);
+    setMediaError(null);
+    setMediaNotice(null);
+    try {
+      const res = await fetch('/api/generate-storyboard-frames', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-user-id': userId,
+        },
+        body: JSON.stringify({
+          projectId,
+          sequenceId: sequence.id,
+          resolution: selectedResolution,
+          renderImages: true,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(
+          data.error || 'El Agente Director no pudo generar los 4 frames de storyboard.'
+        );
+      }
+      if (data.project) {
+        setBrokenImages({});
+        await onProjectMediaUpdated(data.project as ProductionProject);
+      }
+      const renderedCount = Number(data.renderedCount || 0);
+      const warnings = Array.isArray(data.imageWarnings) ? (data.imageWarnings as string[]) : [];
+      if (warnings.length > 0 && renderedCount < 4) {
+        setMediaNotice(
+          `El Agente Director diseñó los 4 frames clave (${renderedCount}/4 renderizados con Nano). Aviso visual: ${warnings[0]}`
+        );
+      } else {
+        setMediaNotice(
+          `4 frames de storyboard clave generados y calibrados a ${selectedResolution} desde la Biblia de Continuidad y el guion técnico.`
+        );
+      }
+    } catch (err) {
+      setMediaError(
+        err instanceof Error
+          ? err.message
+          : 'Error generando los 4 frames clave con el Agente Director.'
+      );
+    } finally {
+      setAutoGenerating4(false);
+    }
+  }
+
   async function handleGenerateImage(frame: StoryboardCard) {
     setGeneratingImgId(frame.id);
     setMediaError(null);
@@ -66,6 +125,7 @@ export function StoryboardView({
           frameId: frame.id,
           prompt: frame.visualPrompt,
           aspectRatio: frame.aspectRatio || sequence.aspectRatio,
+          resolution: selectedResolution,
         }),
       });
       const data = await res.json();
@@ -131,14 +191,66 @@ export function StoryboardView({
             Storyboard y Generación Visual (Nano &amp; Omni Flash)
           </h2>
           <p className="text-xs text-[#8D8981] mt-0.5">
-            Genera fotogramas con Nano (gemini-nano-banana-2.1) y clips en movimiento con Omni Flash (gemini-omni-1.2-flash).
+            Genera automáticamente 4 frames clave basados en la biblia de continuidad y el guion
+            técnico, o renderiza cada plano con Nano y Omni Flash.
           </p>
         </div>
-        <span className="text-xs font-mono-tech text-[#8D8981] tabular-nums">
-          {sequence.storyboardFrames.length}{' '}
-          {sequence.storyboardFrames.length === 1 ? 'fotograma' : 'fotogramas'}
-        </span>
+        <div className="flex flex-wrap items-center gap-3">
+          <div className="flex items-center gap-2">
+            <label
+              htmlFor="storyboard-resolution-select"
+              className="text-xs text-[#C8C3BA] whitespace-nowrap"
+            >
+              Resolución Nano:
+            </label>
+            <select
+              id="storyboard-resolution-select"
+              value={selectedResolution}
+              onChange={(e) => setSelectedResolution(e.target.value as ResolutionTier)}
+              className="rounded-lg border border-white/12 bg-[#0B0B0E] px-2.5 py-1.5 text-xs font-mono-tech text-[#E5A93C] focus:border-[#E5A93C] focus:outline-none"
+            >
+              {RESOLUTION_OPTIONS.map((opt) => (
+                <option key={opt.value} value={opt.value}>
+                  {opt.label}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <button
+            type="button"
+            onClick={handleAutoGenerate4Frames}
+            disabled={autoGenerating4 || Boolean(generatingImgId) || Boolean(generatingVidId)}
+            className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg bg-[#E5A93C] hover:bg-[#EDA949] disabled:opacity-60 text-[#0B0B0E] text-xs font-semibold whitespace-nowrap transition-colors"
+          >
+            <Sparkles className="w-3.5 h-3.5 shrink-0" />
+            <span>
+              {autoGenerating4
+                ? 'Dirigiendo 4 frames clave...'
+                : 'Auto-generar 4 frames clave (Agente Director)'}
+            </span>
+          </button>
+
+          <span className="text-xs font-mono-tech text-[#8D8981] tabular-nums">
+            {sequence.storyboardFrames.length}{' '}
+            {sequence.storyboardFrames.length === 1 ? 'fotograma' : 'fotogramas'}
+          </span>
+        </div>
       </div>
+
+      {mediaNotice && (
+        <div className="rounded-lg border border-[#38B2AC]/35 bg-[#122625] px-4 py-3 text-xs text-[#A7F3D0] flex items-center justify-between gap-3">
+          <span>{mediaNotice}</span>
+          <button
+            type="button"
+            onClick={() => setMediaNotice(null)}
+            aria-label="Cerrar aviso"
+            className="p-1 rounded hover:bg-white/10"
+          >
+            <X className="w-3.5 h-3.5" />
+          </button>
+        </div>
+      )}
 
       {mediaError && (
         <div
@@ -263,7 +375,7 @@ export function StoryboardView({
                   <button
                     type="button"
                     onClick={() => handleGenerateImage(frame)}
-                    disabled={busyImg || busyVid}
+                    disabled={busyImg || busyVid || autoGenerating4}
                     className="flex-1 min-w-[165px] inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg border border-[#E5A93C]/45 bg-[#1B1812] hover:bg-[#272116] disabled:opacity-60 text-xs font-medium text-[#F2F0EB] whitespace-nowrap transition-colors"
                   >
                     <ImagePlus className="w-3.5 h-3.5 text-[#E5A93C] shrink-0" />
@@ -275,7 +387,7 @@ export function StoryboardView({
                   <button
                     type="button"
                     onClick={() => handleGenerateVideo(frame)}
-                    disabled={busyImg || busyVid}
+                    disabled={busyImg || busyVid || autoGenerating4}
                     className="flex-1 min-w-[180px] inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg border border-white/15 bg-[#181822] hover:bg-[#222230] disabled:opacity-60 text-xs font-medium text-[#F2F0EB] whitespace-nowrap transition-colors"
                   >
                     <Video className="w-3.5 h-3.5 text-[#38B2AC] shrink-0" />

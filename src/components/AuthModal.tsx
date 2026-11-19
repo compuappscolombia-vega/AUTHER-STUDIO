@@ -1,16 +1,17 @@
-import { useState } from 'react';
-import { X, MailCheck, ShieldCheck, RefreshCw } from 'lucide-react';
+import { useEffect, useState } from 'react';
+import { X, MailCheck, ShieldCheck, RefreshCw, UserCog } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 
 interface AuthModalProps {
   open: boolean;
   onClose: () => void;
+  onOpenAdminLab?: () => void;
 }
 
 function mapFirebaseAuthError(err: unknown): string {
   const raw = err instanceof Error ? err.message : String(err);
   if (raw.includes('auth/operation-not-allowed')) {
-    return 'El acceso con correo y contraseña aún no está habilitado en Firebase Console. Activa el proveedor Email/Password en Authentication > Sign-in method o accede directamente con Google.';
+    return 'El acceso con correo y contraseña aún no está habilitado en Firebase Console. Activa el proveedor Email/Password o ingresa como Administrador / Google.';
   }
   if (raw.includes('auth/email-already-in-use')) {
     return 'Ya existe una cuenta registrada con este correo electrónico.';
@@ -33,13 +34,15 @@ function mapFirebaseAuthError(err: unknown): string {
   return raw || 'No se pudo completar la autenticación.';
 }
 
-export function AuthModal({ open, onClose }: AuthModalProps) {
+export function AuthModal({ open, onClose, onOpenAdminLab }: AuthModalProps) {
   const {
     user,
     isVerified,
+    isAdminSession,
     signInWithGoogle,
     signInWithEmail,
     registerWithEmail,
+    signInAsAdmin,
     resendVerificationEmail,
     refreshAuthUser,
     logout,
@@ -53,6 +56,15 @@ export function AuthModal({ open, onClose }: AuthModalProps) {
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
 
+  useEffect(() => {
+    if (!open) return;
+    function onKeyDown(e: KeyboardEvent) {
+      if (e.key === 'Escape') onClose();
+    }
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [open, onClose]);
+
   if (!open) return null;
 
   async function handleGoogle() {
@@ -64,6 +76,20 @@ export function AuthModal({ open, onClose }: AuthModalProps) {
       onClose();
     } catch (err) {
       setError(mapFirebaseAuthError(err));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function handleAdminLogin() {
+    setBusy(true);
+    setError(null);
+    setNotice(null);
+    try {
+      await signInAsAdmin();
+      onClose();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'No se pudo cambiar a Administrador.');
     } finally {
       setBusy(false);
     }
@@ -142,10 +168,16 @@ export function AuthModal({ open, onClose }: AuthModalProps) {
         <div className="px-6 py-4 border-b border-white/10 flex items-center justify-between">
           <div>
             <h2 id="auth-modal-title" className="font-display text-lg font-semibold text-[#F2F0EB]">
-              {user ? 'Cuenta del Productor' : 'Acceso al Estudio'}
+              {user
+                ? isAdminSession
+                  ? 'Perfil Administrador Activo'
+                  : 'Cuenta del Productor'
+                : 'Acceso al Estudio'}
             </h2>
             <p className="text-xs text-[#8D8981] mt-0.5">
-              Sincroniza tus producciones, versiones finales y aprendizaje en la base de datos.
+              {isAdminSession
+                ? 'Sesión de análisis, auditoría de secuencias y entrenamiento del Agente Director.'
+                : 'Sincroniza tus producciones, versiones finales y aprendizaje en la base de datos.'}
             </p>
           </div>
           <button
@@ -162,12 +194,18 @@ export function AuthModal({ open, onClose }: AuthModalProps) {
           {user ? (
             <div className="space-y-4">
               <div className="p-4 rounded-lg border border-white/10 bg-[#0B0B0E] space-y-1.5">
-                <div className="text-sm font-semibold text-[#F2F0EB]">
-                  {user.displayName || 'Director AUTEUR'}
+                <div className="text-sm font-semibold text-[#F2F0EB] flex items-center gap-2">
+                  {isAdminSession && <UserCog className="w-4 h-4 text-[#E5A93C]" />}
+                  <span>{user.displayName || 'Director AUTEUR'}</span>
                 </div>
                 <div className="text-xs font-mono-tech text-[#9A968E]">{user.email}</div>
                 <div className="pt-1 flex items-center gap-2 text-xs">
-                  {isVerified ? (
+                  {isAdminSession ? (
+                    <span className="inline-flex items-center gap-1.5 text-[#E5A93C]">
+                      <ShieldCheck className="w-3.5 h-3.5" />
+                      Rol Administrador · Análisis y Entrenamiento del Agente
+                    </span>
+                  ) : isVerified ? (
                     <span className="inline-flex items-center gap-1.5 text-[#38B2AC]">
                       <ShieldCheck className="w-3.5 h-3.5" />
                       Correo verificado · Sincronización Firestore activa
@@ -180,6 +218,20 @@ export function AuthModal({ open, onClose }: AuthModalProps) {
                   )}
                 </div>
               </div>
+
+              {onOpenAdminLab && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    onClose();
+                    onOpenAdminLab();
+                  }}
+                  className="w-full inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg border border-[#E5A93C]/45 bg-[#1B1710] hover:bg-[#272116] text-xs font-semibold text-[#F2F0EB]"
+                >
+                  <UserCog className="w-4 h-4 text-[#E5A93C]" />
+                  <span>Abrir Laboratorio del Agente (Análisis y Enseñanza)</span>
+                </button>
+              )}
 
               {!isVerified && (
                 <div className="space-y-2">
@@ -246,6 +298,16 @@ export function AuthModal({ open, onClose }: AuthModalProps) {
             </div>
           ) : (
             <>
+              <button
+                type="button"
+                onClick={handleAdminLogin}
+                disabled={busy}
+                className="w-full inline-flex items-center justify-center gap-2 py-2.5 px-4 rounded-lg bg-[#E5A93C] hover:bg-[#EDA949] text-xs font-semibold text-[#0B0B0E] transition-colors"
+              >
+                <UserCog className="w-4 h-4" />
+                <span>Entrar como Administrador</span>
+              </button>
+
               <button
                 type="button"
                 onClick={handleGoogle}
@@ -364,7 +426,7 @@ export function AuthModal({ open, onClose }: AuthModalProps) {
                 <button
                   type="submit"
                   disabled={busy}
-                  className="w-full py-2.5 px-4 rounded-lg bg-[#E5A93C] hover:bg-[#EDA949] disabled:opacity-60 text-[#0B0B0E] text-xs font-semibold transition-colors"
+                  className="w-full py-2.5 px-4 rounded-lg border border-white/15 bg-[#191922] hover:bg-[#23232E] disabled:opacity-60 text-[#F2F0EB] text-xs font-semibold transition-colors"
                 >
                   {busy
                     ? 'Procesando...'

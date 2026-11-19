@@ -40,6 +40,7 @@ export function VisionView({
   onApplyEnhancement,
 }: VisionViewProps) {
   const [copiedHex, setCopiedHex] = useState<string | null>(null);
+  const [copiedMaster, setCopiedMaster] = useState(false);
   const [selectedRating, setSelectedRating] = useState<number>(
     sequence.sequenceRating || 5
   );
@@ -55,6 +56,17 @@ export function VisionView({
       setTimeout(() => setCopiedHex(null), 1400);
     } catch {
       // Clipboard blocked in non-secure context; ignore silently
+    }
+  }
+
+  async function handleCopyMasterPrompt() {
+    if (!sequence.hyperRealisticPrompt) return;
+    try {
+      await navigator.clipboard.writeText(sequence.hyperRealisticPrompt);
+      setCopiedMaster(true);
+      setTimeout(() => setCopiedMaster(false), 1500);
+    } catch {
+      // Clipboard blocked; ignore silently
     }
   }
 
@@ -89,10 +101,23 @@ export function VisionView({
     <div className="space-y-8 max-w-5xl">
       {/* Logline & Director Vision */}
       <section aria-labelledby="vision-heading" className="space-y-4">
-        <div className="flex flex-wrap items-center gap-2 text-xs text-[#9A968E] font-mono-tech">
+        <div className="flex flex-wrap items-center gap-2 text-xs text-[#9A968E] font-mono-tech tabular-nums">
           <span>{sequence.directorStyle}</span>
           <span aria-hidden="true">·</span>
           <span>Formato {sequence.aspectRatio}</span>
+          <span aria-hidden="true">·</span>
+          <span className="text-[#E5A93C]">
+            Ultra Def. {sequence.targetResolution || '4K'}
+          </span>
+          {typeof sequence.chapterIndex === 'number' && (
+            <>
+              <span aria-hidden="true">·</span>
+              <span className="text-[#5EEAD4]">
+                Capítulo {sequence.chapterIndex}
+                {sequence.chapterTotal ? `/${sequence.chapterTotal}` : ''}
+              </span>
+            </>
+          )}
           {sequence.sourceFilename && (
             <>
               <span aria-hidden="true">·</span>
@@ -111,6 +136,36 @@ export function VisionView({
         <p className="text-[15px] text-[#CFCAC0] leading-relaxed max-w-[70ch]">
           {sequence.directorVision}
         </p>
+
+        {sequence.hyperRealisticPrompt && (
+          <div className="p-4 rounded-xl border border-[#E5A93C]/30 bg-[#141310] space-y-2">
+            <div className="flex items-center justify-between gap-2">
+              <span className="text-xs font-semibold text-[#E5A93C] font-mono-tech">
+                Prompt Maestro Hiperrealista ({sequence.targetResolution || '4K'})
+              </span>
+              <button
+                type="button"
+                onClick={handleCopyMasterPrompt}
+                className="inline-flex items-center gap-1 text-[11px] font-medium text-[#E5A93C] hover:text-[#F4C46A]"
+              >
+                {copiedMaster ? (
+                  <>
+                    <Check className="w-3 h-3" />
+                    <span>Copiado</span>
+                  </>
+                ) : (
+                  <>
+                    <Copy className="w-3 h-3" />
+                    <span>Copiar prompt</span>
+                  </>
+                )}
+              </button>
+            </div>
+            <p className="font-mono-tech text-xs text-[#E6E2DA] leading-relaxed">
+              {sequence.hyperRealisticPrompt}
+            </p>
+          </div>
+        )}
       </section>
 
       {/* Camera & Optical Package */}

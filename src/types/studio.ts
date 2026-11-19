@@ -1,10 +1,14 @@
 export type SourceMaterialType = 'book' | 'audiobook' | 'story';
 
-export type WorkspaceTab = 'vision' | 'shots' | 'screenplay' | 'storyboard';
+export type WorkspaceTab = 'vision' | 'shots' | 'screenplay' | 'storyboard' | 'trailer';
 
 export type ThinkingDepth = 'standard' | 'deep';
 
 export type SequenceVersionStatus = 'draft' | 'final';
+
+export type ResolutionTier = '720p' | '1080p' | '2K' | '4K';
+
+export type VoicePreset = 'Charon' | 'Kore' | 'Fenrir' | 'Puck' | 'Zephyr';
 
 export type LearningCategory =
   | 'camera'
@@ -13,6 +17,44 @@ export type LearningCategory =
   | 'screenplay'
   | 'pacing'
   | 'continuity';
+
+export interface StudioSettings {
+  defaultResolution: ResolutionTier;
+  defaultDirectorStyle: string;
+  defaultAspectRatio: string;
+  defaultVoicePreset: VoicePreset;
+  defaultThinkingDepth: ThinkingDepth;
+}
+
+export interface BookChapterItem {
+  index: number;
+  title: string;
+  summary: string;
+  keyCharacters: string[];
+  estimatedStartHint: string;
+  sourceExcerpt: string;
+  status: 'pending' | 'producing' | 'completed';
+  sequenceId?: string;
+}
+
+export interface ChapterPlan {
+  sourceAssetId?: string;
+  sourceFilename: string;
+  sourceType: SourceMaterialType;
+  createdAt: string;
+  chapters: BookChapterItem[];
+}
+
+export interface VoiceOverTrack {
+  id: string;
+  characterOrNarrator: string;
+  voicePersona: string;
+  voicePreset: VoicePreset;
+  deliveryDirection: string;
+  timecodeHint: string;
+  text: string;
+  audioUrl?: string;
+}
 
 export interface LearningLesson {
   id: string;
@@ -116,6 +158,10 @@ export interface ProductionSequence {
   sourceFilename?: string;
   directorStyle: string;
   aspectRatio: string;
+  targetResolution?: ResolutionTier;
+  hyperRealisticPrompt?: string;
+  chapterIndex?: number;
+  chapterTotal?: number;
   cameraSystem: string;
   lensPackage: string;
   filmStockOrLut: string;
@@ -125,6 +171,7 @@ export interface ProductionSequence {
   lighting: LightingSetup;
   shotList: ShotSpec[];
   soundDesign: SoundDesignSpec;
+  voiceOverTracks?: VoiceOverTrack[];
   audioAnalysis?: AudioAnalysisReport;
   vfx: VfxBreakdown;
   screenplay: ScreenplayScene[];
@@ -135,6 +182,45 @@ export interface ProductionSequence {
   updatedAt?: string;
 }
 
+export interface TrailerBeat {
+  id: string;
+  beatNumber: number;
+  startSec: number;
+  endSec: number;
+  durationSec: number;
+  sourceSequenceId: string;
+  sourceSequenceTitle: string;
+  visualDescription: string;
+  hyperRealisticPrompt: string;
+  motionPrompt: string;
+  voiceOverLine: string;
+  onScreenTitleCard: string;
+  sfxCue: string;
+  editingTransition: string;
+  imageUrl?: string;
+  videoUrl?: string;
+}
+
+export interface ProjectTrailer {
+  id: string;
+  title: string;
+  tagline: string;
+  tone: string;
+  targetResolution: ResolutionTier;
+  totalDurationSec: number;
+  voicePreset: VoicePreset;
+  voiceDirection: string;
+  voiceOverScript: string;
+  voiceOverAudioUrl?: string;
+  musicPrompt: string;
+  tempoBpm: number;
+  soundMixNotes: string;
+  musicAudioUrl?: string;
+  approvedSequenceIds: string[];
+  beats: TrailerBeat[];
+  createdAt: string;
+}
+
 export interface ProductionProject {
   id: string;
   title: string;
@@ -142,6 +228,8 @@ export interface ProductionProject {
   defaultSourceType: SourceMaterialType;
   continuityBible: string;
   assets?: ProjectAsset[];
+  chapterPlan?: ChapterPlan;
+  trailer?: ProjectTrailer;
   createdAt: string;
   updatedAt: string;
   sequences: ProductionSequence[];
@@ -184,3 +272,55 @@ export interface StudioIntelligenceReport {
   topSoundscapes: PatternMetric[];
   enhancements: DirectorialEnhancement[];
 }
+
+export interface TimelineMilestone {
+  sequenceId: string;
+  milestoneNumber: number;
+  title: string;
+  chapterIndex?: number;
+  shotCount: number;
+  durationSec: number;
+  cameraSystem: string;
+  aspectRatio: string;
+  targetResolution: ResolutionTier;
+  continuityHighlight: string;
+  approvedAt: string;
+}
+
+export type UserRole = 'director' | 'admin';
+
+export interface AdminAgentProfile {
+  strictContinuityMode: boolean;
+  preferredVisualGrammar: string;
+  customDirectives: string;
+  targetAudienceTone: string;
+  updatedAt: string;
+}
+
+export interface SequenceLocalMetrics {
+  shotCount: number;
+  screenplaySceneCount: number;
+  screenplayBeatCount: number;
+  dialogueBeatCount: number;
+  storyboardCount: number;
+  voiceOverCount: number;
+  hasContinuityBible: boolean;
+  hasHyperRealisticPrompt: boolean;
+  readinessScore: number;
+}
+
+export interface AgentDiagnosticReport {
+  coherenceScore: number;
+  summary: string;
+  strengths: string[];
+  weaknesses: string[];
+  continuityRisks: string[];
+  recommendedLessons: Array<{
+    category: LearningCategory;
+    insight: string;
+    rating: number;
+  }>;
+  localMetrics: SequenceLocalMetrics;
+  auditedAt: string;
+}
+

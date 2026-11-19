@@ -8,6 +8,7 @@ import {
   Lock,
   PanelLeftClose,
   PanelLeftOpen,
+  UserCog,
 } from 'lucide-react';
 import type {
   AudioAnalysisReport,
@@ -16,20 +17,25 @@ import type {
   ProductionProject,
   ProductionSequence,
   SourceMaterialType,
+  StudioSettings,
   WorkspaceTab,
 } from './types/studio';
 import { TopBar } from './components/TopBar';
 import { ProjectSidebar } from './components/ProjectSidebar';
+import { TimelineBar } from './components/TimelineBar';
 import { SourceIngestPanel } from './components/SourceIngestPanel';
 import { VisionView } from './components/VisionView';
 import { ShotsAndSoundView } from './components/ShotsAndSoundView';
 import { ScreenplayView } from './components/ScreenplayView';
 import { StoryboardView } from './components/StoryboardView';
+import { TrailerView } from './components/TrailerView';
 import { NewProjectModal } from './components/NewProjectModal';
 import { AgentBlueprintModal } from './components/AgentBlueprintModal';
 import { AuthModal } from './components/AuthModal';
 import { AuthGate } from './components/AuthGate';
 import { LearningModal } from './components/LearningModal';
+import { StudioSettingsModal } from './components/StudioSettingsModal';
+import { AdminAgentLabModal } from './components/AdminAgentLabModal';
 import { useAuth } from './context/AuthContext';
 import {
   canExportPdfForSequence,
@@ -41,6 +47,13 @@ import {
   buildRatedChoiceLessons,
   buildStudioIntelligence,
 } from './utils/studioIntelligence';
+import {
+  DEFAULT_STUDIO_SETTINGS,
+  loadStudioSettings,
+  mergeLocalAndCloudProjects,
+  saveStudioSettings,
+} from './utils/productionPipeline';
+import { buildLocalPreviewFixture } from './utils/devPreviewFixture';
 import {
   addLessonToFirestore,
   deleteLessonFromFirestore,
@@ -59,12 +72,16 @@ function getUserCacheKey(uid: string): string {
 }
 
 export default function App() {
-  const { user, loading: authLoading, isVerified } = useAuth();
+  const { user, loading: authLoading, isVerified, isAdminSession, isLocalDevPreview } = useAuth();
+  const skipCloudSync = isLocalDevPreview || isAdminSession;
 
   const [projects, setProjects] = useState<ProductionProject[]>([]);
   const [activeProjectId, setActiveProjectId] = useState<string>('');
   const [activeSequenceId, setActiveSequenceId] = useState<string>('');
   const [lessons, setLessons] = useState<LearningLesson[]>([]);
+  const [studioSettings, setStudioSettings] = useState<StudioSettings>(
+    DEFAULT_STUDIO_SETTINGS
+  );
   const [activeTab, setActiveTab] = useState<WorkspaceTab>('vision');
   const [searchQuery, setSearchQuery] = useState('');
   const [showIngest, setShowIngest] = useState(true);
@@ -73,6 +90,8 @@ export default function App() {
   const [blueprintOpen, setBlueprintOpen] = useState(false);
   const [authOpen, setAuthOpen] = useState(false);
   const [learningOpen, setLearningOpen] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [adminLabOpen, setAdminLabOpen] = useState(false);
   const [isProducing, setIsProducing] = useState(false);
   const [finalizingSeq, setFinalizingSeq] = useState(false);
   const [exportingPdf, setExportingPdf] = useState(false);
@@ -100,6 +119,7 @@ export default function App() {
 
     const uid = user.uid;
     const cacheKey = getUserCacheKey(uid);
+    setStudioSettings(loadStudioSettings(uid));
     let cancelled = false;
 
     async function loadUserWorkspace() {
@@ -139,16 +159,20 @@ export default function App() {
 
       if (cancelled) return;
 
+      if (isLocalDevPreview && localProjects.length === 0) {
+        localProjects = buildLocalPreviewFixture();
+      }
+
       let merged = localProjects;
-      try {
-        const cloudProjects = await loadUserProjectsFromFirestore(uid);
-        if (!cancelled && cloudProjects.length > 0) {
-          const cloudIds = new Set(cloudProjects.map((p) => p.id));
-          const localOnly = localProjects.filter((p) => !cloudIds.has(p.id));
-          merged = [...cloudProjects, ...localOnly];
+      if (!skipCloudSync) {
+        try {
+          const cloudProjects = await loadUserProjectsFromFirestore(uid);
+          if (!cancelled && cloudProjects.length > 0) {
+            merged = mergeLocalAndCloudProjects(localProjects, cloudProjects);
+          }
+        } catch (err) {
+          console.error('Error cargando proyectos desde Firestore:', err);
         }
-      } catch (err) {
-        console.error('Error cargando proyectos desde Firestore:', err);
       }
 
       if (cancelled) return;
@@ -168,17 +192,19 @@ export default function App() {
 
     void loadUserWorkspace();
 
-    const unsubLessons = subscribeLessonsFromFirestore(uid, (cloudLessons) => {
-      if (!cancelled && cloudLessons.length > 0) {
-        setLessons(cloudLessons);
-      }
-    });
+    const unsubLessons = skipCloudSync
+      ? () => {}
+      : subscribeLessonsFromFirestore(uid, (cloudLessons) => {
+          if (!cancelled && cloudLessons.length > 0) {
+            setLessons(cloudLessons);
+          }
+        });
 
     return () => {
       cancelled = true;
       unsubLessons();
     };
-  }, [user?.uid, isVerified]);
+  }, [user?.uid, isVerified, skipCloudSync]);
 
   if (authLoading) {
     return (
@@ -225,6 +251,18 @@ export default function App() {
     setProduceError(null);
   }
 
+  function handleSelectTimelineSequence(sequenceId: string) {
+    setActiveSequenceId(sequenceId);
+    if (activeTab === 'trailer') {
+      setActiveTab('vision');
+    }
+  }
+
+  function handleSaveStudioSettings(next: StudioSettings) {
+    setStudioSettings(next);
+    saveStudioSettings(currentUid, next);
+  }
+
   async function handleCreateProject(payload: {
     title: string;
     genreStyle: string;
@@ -251,11 +289,25 @@ export default function App() {
     setActiveSequenceId('');
     setShowIngest(true);
 
-    await saveProjectToFirestore(currentUid, created);
+    if (!skipCloudSync) {
+      await saveProjectToFirestore(currentUid, created);
+    }
   }
 
   async function handleSaveContinuity(continuityBible: string) {
     if (!activeProject) return;
+    if (isLocalDevPreview && activeProject.id === 'proj-preview-odisea') {
+      const updatedProj: ProductionProject = {
+        ...activeProject,
+        continuityBible,
+        updatedAt: new Date().toISOString(),
+      };
+      const next = projects.map((p) => (p.id === updatedProj.id ? updatedProj : p));
+      setProjects(next);
+      localStorage.setItem(userCacheKey, JSON.stringify(next));
+      return;
+    }
+
     const res = await fetch(`/api/projects/${activeProject.id}`, {
       method: 'PATCH',
       headers: {
@@ -274,7 +326,9 @@ export default function App() {
     setProjects(next);
     localStorage.setItem(userCacheKey, JSON.stringify(next));
 
-    await updateProjectContinuityInFirestore(currentUid, updatedProj.id, continuityBible);
+    if (!skipCloudSync) {
+      await updateProjectContinuityInFirestore(currentUid, updatedProj.id, continuityBible);
+    }
   }
 
   async function handleAnalyzeAudioOnly(
@@ -304,7 +358,32 @@ export default function App() {
     return data.report as AudioAnalysisReport;
   }
 
-  async function handleProduce(formData: FormData) {
+  async function handleAnalyzeChapters(formData: FormData): Promise<ProductionProject | null> {
+    setProduceError(null);
+    const res = await fetch('/api/analyze-chapters', {
+      method: 'POST',
+      headers: { 'x-user-id': currentUid },
+      body: formData,
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      const msg = data.error || 'No se pudo extraer la estructura de capítulos.';
+      setProduceError(msg);
+      throw new Error(msg);
+    }
+    const updatedProj = data.project as ProductionProject;
+    setProjects((prev) => {
+      const next = prev.map((p) => (p.id === updatedProj.id ? updatedProj : p));
+      localStorage.setItem(userCacheKey, JSON.stringify(next));
+      return next;
+    });
+    if (!skipCloudSync) {
+      await saveProjectToFirestore(currentUid, updatedProj);
+    }
+    return updatedProj;
+  }
+
+  async function handleProduce(formData: FormData): Promise<ProductionProject | null> {
     setIsProducing(true);
     setProduceError(null);
     try {
@@ -319,18 +398,24 @@ export default function App() {
       }
       const updatedProj = data.project as ProductionProject;
       const newSeq = data.sequence as ProductionSequence;
-      const next = projects.map((p) => (p.id === updatedProj.id ? updatedProj : p));
-      setProjects(next);
-      localStorage.setItem(userCacheKey, JSON.stringify(next));
+      setProjects((prev) => {
+        const next = prev.map((p) => (p.id === updatedProj.id ? updatedProj : p));
+        localStorage.setItem(userCacheKey, JSON.stringify(next));
+        return next;
+      });
       setActiveSequenceId(newSeq.id);
       setActiveTab('vision');
 
-      await saveProjectToFirestore(currentUid, updatedProj);
-      await saveSequenceToFirestore(currentUid, updatedProj.id, newSeq);
+      if (!skipCloudSync) {
+        await saveProjectToFirestore(currentUid, updatedProj);
+        await saveSequenceToFirestore(currentUid, updatedProj.id, newSeq);
+      }
+      return updatedProj;
     } catch (err) {
       setProduceError(
         err instanceof Error ? err.message : 'No se pudo completar la producción.'
       );
+      return null;
     } finally {
       setIsProducing(false);
     }
@@ -360,17 +445,19 @@ export default function App() {
         setLessons(data.lessons);
       }
 
-      await finalizeSequenceInFirestore(currentUid, activeProject.id, activeSequence.id);
-      const autoLessons = extractAutomaticLessons(activeProject.title, {
-        ...activeSequence,
-        versionStatus: 'final',
-      });
-      for (let i = 0; i < autoLessons.length; i++) {
-        await addLessonToFirestore(currentUid, {
-          ...autoLessons[i],
-          id: `lesson-auto-${Date.now().toString(36)}-${i}`,
-          createdAt: new Date().toISOString(),
+      if (!skipCloudSync) {
+        await finalizeSequenceInFirestore(currentUid, activeProject.id, activeSequence.id);
+        const autoLessons = extractAutomaticLessons(activeProject.title, {
+          ...activeSequence,
+          versionStatus: 'final',
         });
+        for (let i = 0; i < autoLessons.length; i++) {
+          await addLessonToFirestore(currentUid, {
+            ...autoLessons[i],
+            id: `lesson-auto-${Date.now().toString(36)}-${i}`,
+            createdAt: new Date().toISOString(),
+          });
+        }
       }
     } catch (err) {
       setProduceError(
@@ -432,7 +519,7 @@ export default function App() {
     if (Array.isArray(data.lessons)) {
       setLessons(data.lessons);
     }
-    if (data.lesson) {
+    if (data.lesson && !skipCloudSync) {
       await addLessonToFirestore(currentUid, data.lesson as LearningLesson);
     }
   }
@@ -448,7 +535,9 @@ export default function App() {
         setLessons(data.lessons);
       }
     }
-    await deleteLessonFromFirestore(currentUid, lessonId);
+    if (!skipCloudSync) {
+      await deleteLessonFromFirestore(currentUid, lessonId);
+    }
   }
 
   async function handleRateSequence(rating: number, note: string) {
@@ -480,7 +569,7 @@ export default function App() {
     if (Array.isArray(data.lessons)) {
       setLessons(data.lessons);
     }
-    if (rating >= 4) {
+    if (rating >= 4 && !skipCloudSync) {
       const extracted = buildRatedChoiceLessons({
         projectTitle: activeProject.title,
         sequence: activeSequence,
@@ -511,11 +600,21 @@ export default function App() {
     setProjects(next);
     localStorage.setItem(userCacheKey, JSON.stringify(next));
 
-    if (activeSequence) {
+    if (!skipCloudSync && activeSequence) {
       const updatedSeq = updatedProj.sequences.find((s) => s.id === activeSequence.id);
       if (updatedSeq && updatedSeq.versionStatus === 'draft') {
         await saveSequenceToFirestore(currentUid, updatedProj.id, updatedSeq);
       }
+    }
+  }
+
+  function handleProjectSeeded(seededProjects: ProductionProject[], seededId: string) {
+    setProjects(seededProjects);
+    localStorage.setItem(userCacheKey, JSON.stringify(seededProjects));
+    const target = seededProjects.find((p) => p.id === seededId) || seededProjects[0];
+    if (target) {
+      setActiveProjectId(target.id);
+      setActiveSequenceId(target.sequences[0]?.id || '');
     }
   }
 
@@ -528,6 +627,8 @@ export default function App() {
         onTabChange={setActiveTab}
         onOpenNewProject={() => setNewProjectOpen(true)}
         onOpenAuth={() => setAuthOpen(true)}
+        onOpenAdminLab={() => setAdminLabOpen(true)}
+        isAdmin={isAdminSession}
         userLabel={userLabel}
         onToggleMobileMenu={() => setMobileMenuOpen(true)}
       />
@@ -535,21 +636,22 @@ export default function App() {
       {/* Mobile Tab Bar */}
       <nav
         aria-label="Vistas móviles del estudio"
-        className="flex md:hidden items-center gap-1 px-3 py-1.5 border-b border-white/10 bg-[#101015] overflow-x-auto shrink-0"
+        className="flex md:hidden items-center justify-between gap-1 px-2.5 py-1.5 border-b border-white/10 bg-[#101015] overflow-x-auto shrink-0"
       >
         {(
           [
             { id: 'vision', label: 'Dirección' },
-            { id: 'shots', label: 'Planos y Sonido' },
+            { id: 'shots', label: 'Planos' },
             { id: 'screenplay', label: 'Guion' },
             { id: 'storyboard', label: 'Storyboard' },
+            { id: 'trailer', label: 'Tráiler 30s' },
           ] as const
         ).map((tab) => (
           <button
             key={tab.id}
             type="button"
             onClick={() => setActiveTab(tab.id)}
-            className={`px-3 py-1.5 rounded-md text-xs font-medium whitespace-nowrap shrink-0 ${
+            className={`px-2 py-1.5 rounded-md text-[11px] font-medium whitespace-nowrap shrink-0 ${
               activeTab === tab.id
                 ? 'bg-[#E5A93C] text-[#0B0B0E]'
                 : 'text-[#9A968E] hover:text-[#F2F0EB]'
@@ -566,11 +668,14 @@ export default function App() {
           activeProjectId={activeProject?.id || ''}
           searchQuery={searchQuery}
           lessonsCount={lessons.length}
+          isAdmin={isAdminSession}
           onSearchChange={setSearchQuery}
           onSelectProject={handleSelectProject}
           onOpenNewProject={() => setNewProjectOpen(true)}
           onOpenAgentBlueprint={() => setBlueprintOpen(true)}
+          onOpenAdminLab={() => setAdminLabOpen(true)}
           onOpenLearning={() => setLearningOpen(true)}
+          onOpenSettings={() => setSettingsOpen(true)}
           mobileOpen={mobileMenuOpen}
           onCloseMobile={() => setMobileMenuOpen(false)}
         />
@@ -695,22 +800,42 @@ export default function App() {
             </div>
           )}
 
+          {/* Horizontal Approved Sequences Timeline */}
+          {activeProject && (
+            <TimelineBar
+              project={activeProject}
+              activeSequenceId={activeSequence?.id || ''}
+              onSelectSequence={handleSelectTimelineSequence}
+            />
+          )}
+
           {/* Split Workspace: Ingest Drawer + Active View */}
           <div className="flex-1 flex flex-col xl:flex-row overflow-y-auto xl:overflow-hidden">
             {activeProject && showIngest && (
               <SourceIngestPanel
+                userId={currentUid}
                 project={activeProject}
+                studioSettings={studioSettings}
                 isProducing={isProducing}
                 errorMessage={produceError}
                 onDismissError={() => setProduceError(null)}
                 onSaveContinuity={handleSaveContinuity}
                 onProduce={handleProduce}
                 onAnalyzeAudioOnly={handleAnalyzeAudioOnly}
+                onAnalyzeChapters={handleAnalyzeChapters}
               />
             )}
 
             <div className="flex-1 xl:overflow-y-auto p-6 lg:p-8 min-w-0">
-              {isProducing ? (
+              {activeTab === 'trailer' && activeProject ? (
+                <TrailerView
+                  userId={currentUid}
+                  project={activeProject}
+                  studioSettings={studioSettings}
+                  onProjectUpdated={handleProjectMediaUpdated}
+                  onGoToVision={() => setActiveTab('vision')}
+                />
+              ) : isProducing ? (
                 <div className="py-20 max-w-md mx-auto text-center space-y-3">
                   <Clapperboard className="w-8 h-8 text-[#E5A93C] mx-auto" />
                   <h2 className="font-display text-lg font-semibold text-[#F2F0EB]">
@@ -718,7 +843,7 @@ export default function App() {
                   </h2>
                   <p className="text-xs text-[#9A968E] leading-relaxed">
                     Estructurando óptica de cámara, temperaturas de luz, lista de planos, mezcla
-                    Dolby Atmos, análisis de audio, VFX y guion completo.
+                    Dolby Atmos, voces en off realistas, VFX y guion completo.
                   </p>
                 </div>
               ) : activeSequence ? (
@@ -733,7 +858,14 @@ export default function App() {
                       onApplyEnhancement={handleApplyEnhancement}
                     />
                   )}
-                  {activeTab === 'shots' && <ShotsAndSoundView sequence={activeSequence} />}
+                  {activeTab === 'shots' && activeProject && (
+                    <ShotsAndSoundView
+                      userId={currentUid}
+                      projectId={activeProject.id}
+                      sequence={activeSequence}
+                      onProjectMediaUpdated={handleProjectMediaUpdated}
+                    />
+                  )}
                   {activeTab === 'screenplay' && activeProject && (
                     <ScreenplayView
                       project={activeProject}
@@ -748,6 +880,7 @@ export default function App() {
                       userId={currentUid}
                       projectId={activeProject.id}
                       sequence={activeSequence}
+                      defaultResolution={studioSettings.defaultResolution}
                       onProjectMediaUpdated={handleProjectMediaUpdated}
                     />
                   )}
@@ -759,7 +892,7 @@ export default function App() {
                     Producción lista para rodar
                   </h2>
                   <p className="text-sm text-[#9A968E] leading-relaxed">
-                    Carga un capítulo de libro, un audiolibro en MP3/WAV/M4A/OGG o escribe tu
+                    Carga un capítulo de libro, un audiolibro en MP3/WAV/M4A/OGG o dicta tu
                     historia en la mesa de ingesta para dirigir la primera secuencia.
                   </p>
                   {!showIngest && (
@@ -785,14 +918,26 @@ export default function App() {
                       historia original desde cero.
                     </p>
                   </div>
-                  <button
-                    type="button"
-                    onClick={() => setNewProjectOpen(true)}
-                    className="inline-flex items-center gap-2 px-5 py-2.5 rounded-lg bg-[#E5A93C] hover:bg-[#EDA949] text-[#0B0B0E] text-xs font-semibold transition-colors"
-                  >
-                    <FolderPlus className="w-4 h-4" />
-                    <span>Crear nueva producción</span>
-                  </button>
+                  <div className="flex flex-wrap items-center justify-center gap-3">
+                    <button
+                      type="button"
+                      onClick={() => setNewProjectOpen(true)}
+                      className="inline-flex items-center gap-2 px-5 py-2.5 rounded-lg bg-[#E5A93C] hover:bg-[#EDA949] text-[#0B0B0E] text-xs font-semibold transition-colors"
+                    >
+                      <FolderPlus className="w-4 h-4" />
+                      <span>Crear nueva producción</span>
+                    </button>
+                    {isAdminSession && (
+                      <button
+                        type="button"
+                        onClick={() => setAdminLabOpen(true)}
+                        className="inline-flex items-center gap-2 px-5 py-2.5 rounded-lg border border-[#E5A93C]/45 bg-[#1B1710] hover:bg-[#272116] text-[#F2F0EB] text-xs font-semibold transition-colors"
+                      >
+                        <UserCog className="w-4 h-4 text-[#E5A93C]" />
+                        <span>Abrir Laboratorio del Agente</span>
+                      </button>
+                    )}
+                  </div>
                 </div>
               )}
             </div>
@@ -812,7 +957,23 @@ export default function App() {
         activeProject={activeProject}
       />
 
-      <AuthModal open={authOpen} onClose={() => setAuthOpen(false)} />
+      <AuthModal
+        open={authOpen}
+        onClose={() => setAuthOpen(false)}
+        onOpenAdminLab={() => setAdminLabOpen(true)}
+      />
+
+      <AdminAgentLabModal
+        open={adminLabOpen}
+        userId={currentUid}
+        activeProject={activeProject}
+        activeSequence={activeSequence}
+        lessons={lessons}
+        onClose={() => setAdminLabOpen(false)}
+        onAddLesson={handleAddLesson}
+        onDeleteLesson={handleDeleteLesson}
+        onProjectSeeded={handleProjectSeeded}
+      />
 
       <LearningModal
         open={learningOpen}
@@ -821,6 +982,13 @@ export default function App() {
         onClose={() => setLearningOpen(false)}
         onAddLesson={handleAddLesson}
         onDeleteLesson={handleDeleteLesson}
+      />
+
+      <StudioSettingsModal
+        open={settingsOpen}
+        settings={studioSettings}
+        onClose={() => setSettingsOpen(false)}
+        onSaveSettings={handleSaveStudioSettings}
       />
     </div>
   );
