@@ -3,7 +3,7 @@ import type {
   ProductionProject,
   ProductionSequence,
   SourceMaterialType,
-} from '../types/studio';
+} from '../types/studio.ts';
 
 export const DIRECTOR_STYLES: DirectorStylePreset[] = [
   {

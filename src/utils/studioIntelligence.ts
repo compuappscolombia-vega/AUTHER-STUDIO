@@ -5,7 +5,7 @@ import type {
   ProductionProject,
   ProductionSequence,
   StudioIntelligenceReport,
-} from '../types/studio';
+} from '../types/studio.ts';
 
 function pushPattern(
   map: Map<string, { detail: string; ratings: number[]; projects: Set<string> }>,

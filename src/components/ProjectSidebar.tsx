@@ -1,4 +1,4 @@
-import { Search, FolderPlus, Layers, Brain, Sliders, UserCog, X } from 'lucide-react';
+import { Search, FolderPlus, Layers, Brain, Sliders, UserCog, Keyboard, X } from 'lucide-react';
 import type { ProductionProject } from '../types/studio';
 import {
   computeProjectStats,
@@ -19,6 +19,7 @@ interface ProjectSidebarProps {
   onOpenAdminLab: () => void;
   onOpenLearning: () => void;
   onOpenSettings: () => void;
+  onOpenShortcuts: () => void;
   mobileOpen: boolean;
   onCloseMobile: () => void;
 }
@@ -36,6 +37,7 @@ export function ProjectSidebar({
   onOpenAdminLab,
   onOpenLearning,
   onOpenSettings,
+  onOpenShortcuts,
   mobileOpen,
   onCloseMobile,
 }: ProjectSidebarProps) {
@@ -210,6 +212,21 @@ export function ProjectSidebar({
         >
           <Sliders className="w-3.5 h-3.5 text-[#E5A93C]" />
           <span>Configuración</span>
+        </button>
+
+        <button
+          type="button"
+          onClick={() => {
+            onOpenShortcuts();
+            onCloseMobile();
+          }}
+          className="w-full flex items-center justify-between gap-2 px-3 py-2 rounded-lg border border-white/10 bg-[#13131A] hover:bg-[#1C1C26] text-xs font-medium text-[#C8C3BA] transition-colors whitespace-nowrap"
+        >
+          <span className="inline-flex items-center gap-2">
+            <Keyboard className="w-3.5 h-3.5 text-[#E5A93C]" />
+            <span>Atajos de teclado</span>
+          </span>
+          <kbd className="font-mono-tech text-[10px] text-[#8D8981]">?</kbd>
         </button>
       </div>
     </div>

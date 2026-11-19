@@ -3,7 +3,7 @@ import type {
   LearningLesson,
   ProductionProject,
   ProductionSequence,
-} from '../types/studio';
+} from '../types/studio.ts';
 
 export const LEARNING_CATEGORY_LABELS: Record<LearningCategory, string> = {
   camera: 'Cámara y Óptica',

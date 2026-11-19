@@ -14,6 +14,7 @@ interface ShotsAndSoundViewProps {
   sequence: ProductionSequence;
   onEnsureProjectSynced: () => Promise<void>;
   onProjectMediaUpdated: (project: ProductionProject) => Promise<void>;
+  onOpenVoiceoverModal?: (beatKey?: string) => void;
 }
 
 export function ShotsAndSoundView({
@@ -22,6 +23,7 @@ export function ShotsAndSoundView({
   sequence,
   onEnsureProjectSynced,
   onProjectMediaUpdated,
+  onOpenVoiceoverModal,
 }: ShotsAndSoundViewProps) {
   const [selectedShotIdx, setSelectedShotIdx] = useState(0);
   const [generatingVoId, setGeneratingVoId] = useState<string | null>(null);
@@ -300,8 +302,20 @@ export function ShotsAndSoundView({
               Ingeniería Sonora, Foley y Banda Sonora
             </h2>
           </div>
-          <div className="text-xs font-mono-tech text-[#8D8981] tabular-nums">
-            Dolby Atmos · {soundDesign.tempoBpm} BPM
+          <div className="flex flex-wrap items-center gap-3">
+            {onOpenVoiceoverModal && (
+              <button
+                type="button"
+                onClick={() => onOpenVoiceoverModal()}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-[#38B2AC]/45 bg-[#102625] hover:bg-[#163433] text-xs font-medium text-[#5EEAD4] whitespace-nowrap"
+              >
+                <AudioLines className="w-3.5 h-3.5" />
+                <span>Estudio TTS Provisional</span>
+              </button>
+            )}
+            <div className="text-xs font-mono-tech text-[#8D8981] tabular-nums">
+              Dolby Atmos · {soundDesign.tempoBpm} BPM
+            </div>
           </div>
         </div>
 

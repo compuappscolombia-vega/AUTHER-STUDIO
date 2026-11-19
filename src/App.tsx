@@ -40,6 +40,8 @@ import { AuthGate } from './components/AuthGate';
 import { LearningModal } from './components/LearningModal';
 import { StudioSettingsModal } from './components/StudioSettingsModal';
 import { AdminAgentLabModal } from './components/AdminAgentLabModal';
+import { VoiceoverPreviewModal } from './components/VoiceoverPreviewModal';
+import { KeyboardShortcutsModal } from './components/KeyboardShortcutsModal';
 import { useAuth } from './context/AuthContext';
 import {
   canExportPdfForSequence,
@@ -59,6 +61,11 @@ import {
 } from './utils/productionPipeline';
 import { buildLocalPreviewFixture } from './utils/devPreviewFixture';
 import { parseApiResponse } from './utils/apiClient';
+import {
+  getNextStudioTab,
+  isEditableEventTarget,
+  resolveStudioShortcutAction,
+} from './utils/keyboardShortcuts';
 import {
   addLessonToFirestore,
   deleteLessonFromFirestore,
@@ -106,6 +113,9 @@ export default function App() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [adminLabOpen, setAdminLabOpen] = useState(false);
   const [liveVoiceOpen, setLiveVoiceOpen] = useState(false);
+  const [voiceoverModalOpen, setVoiceoverModalOpen] = useState(false);
+  const [voiceoverBeatKey, setVoiceoverBeatKey] = useState<string | null>(null);
+  const [shortcutsOpen, setShortcutsOpen] = useState(false);
   const [isReadingMode, setIsReadingMode] = useState(false);
   const [isProducing, setIsProducing] = useState(false);
   const [finalizingSeq, setFinalizingSeq] = useState(false);
@@ -127,6 +137,66 @@ export default function App() {
       setIsReadingMode(false);
     }
   }, [activeTab, isReadingMode]);
+
+  // Global keyboard shortcuts for studio tabs, reading mode, and utility modals
+  const hasBlockingModalOpen =
+    newProjectOpen ||
+    blueprintOpen ||
+    authOpen ||
+    learningOpen ||
+    settingsOpen ||
+    adminLabOpen ||
+    liveVoiceOpen ||
+    voiceoverModalOpen;
+
+  const currentSequenceExists = Boolean(
+    (projects.find((p) => p.id === activeProjectId) || projects[0])?.sequences?.length
+  );
+
+  useEffect(() => {
+    function handleGlobalKeyDown(event: KeyboardEvent) {
+      const action = resolveStudioShortcutAction({
+        key: event.key,
+        ctrlKey: event.ctrlKey,
+        metaKey: event.metaKey,
+        altKey: event.altKey,
+        isEditable: isEditableEventTarget(event.target),
+        hasBlockingModalOpen,
+        shortcutsModalOpen: shortcutsOpen,
+      });
+      if (!action) return;
+
+      event.preventDefault();
+      if (action.type === 'toggle-shortcuts-modal') {
+        setShortcutsOpen((v) => !v);
+      } else if (action.type === 'switch-tab') {
+        setActiveTab(action.tab);
+      } else if (action.type === 'cycle-tab') {
+        setActiveTab((prev) => getNextStudioTab(prev, action.direction));
+      } else if (action.type === 'toggle-reading-mode') {
+        if (!currentSequenceExists) return;
+        if (activeTab !== 'screenplay') {
+          setActiveTab('screenplay');
+          setIsReadingMode(true);
+        } else {
+          setIsReadingMode((v) => !v);
+        }
+      } else if (action.type === 'toggle-ingest') {
+        setShowIngest((v) => !v);
+      } else if (action.type === 'open-voiceover-modal') {
+        if (!currentSequenceExists) return;
+        setVoiceoverBeatKey(null);
+        setVoiceoverModalOpen(true);
+      } else if (action.type === 'open-new-project') {
+        setNewProjectOpen(true);
+      } else if (action.type === 'open-settings') {
+        setSettingsOpen(true);
+      }
+    }
+
+    window.addEventListener('keydown', handleGlobalKeyDown);
+    return () => window.removeEventListener('keydown', handleGlobalKeyDown);
+  }, [activeTab, currentSequenceExists, hasBlockingModalOpen, shortcutsOpen]);
 
   // Load user-scoped workspace & Firestore cloud projects ONLY after verified login
   useEffect(() => {
@@ -884,6 +954,7 @@ export default function App() {
               onOpenAdminLab={() => setAdminLabOpen(true)}
               onOpenLearning={() => setLearningOpen(true)}
               onOpenSettings={() => setSettingsOpen(true)}
+              onOpenShortcuts={() => setShortcutsOpen(true)}
               mobileOpen={mobileMenuOpen}
               onCloseMobile={() => setMobileMenuOpen(false)}
             />
@@ -1104,6 +1175,10 @@ export default function App() {
                       sequence={activeSequence}
                       onEnsureProjectSynced={() => ensureProjectSyncedOnServer(activeProject)}
                       onProjectMediaUpdated={handleProjectMediaUpdated}
+                      onOpenVoiceoverModal={(beatKey) => {
+                        setVoiceoverBeatKey(beatKey || null);
+                        setVoiceoverModalOpen(true);
+                      }}
                     />
                   )}
                   {activeTab === 'screenplay' && (
@@ -1118,6 +1193,11 @@ export default function App() {
                       onAddNote={handleAddScreenplayNote}
                       onToggleResolveNote={handleToggleResolveScreenplayNote}
                       onDeleteNote={handleDeleteScreenplayNote}
+                      onOpenVoiceoverModal={(beatKey) => {
+                        setVoiceoverBeatKey(beatKey || null);
+                        setVoiceoverModalOpen(true);
+                      }}
+                      onOpenShortcuts={() => setShortcutsOpen(true)}
                     />
                   )}
                   {activeTab === 'storyboard' && (
@@ -1250,6 +1330,18 @@ export default function App() {
         activeProject={activeProject}
         activeSequence={activeSequence}
         defaultVoicePreset={studioSettings.defaultVoicePreset}
+      />
+
+      <VoiceoverPreviewModal
+        open={voiceoverModalOpen}
+        sequence={activeSequence || null}
+        initialBeatKey={voiceoverBeatKey}
+        onClose={() => setVoiceoverModalOpen(false)}
+      />
+
+      <KeyboardShortcutsModal
+        open={shortcutsOpen}
+        onClose={() => setShortcutsOpen(false)}
       />
     </div>
   );

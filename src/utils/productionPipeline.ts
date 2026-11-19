@@ -8,7 +8,7 @@ import type {
   TimelineMilestone,
   TrailerBeat,
   VoicePreset,
-} from '../types/studio';
+} from '../types/studio.ts';
 
 export const RESOLUTION_OPTIONS: {
   value: ResolutionTier;

@@ -1,9 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
+  AudioLines,
   BookOpen,
   CheckCircle2,
   Download,
   FileCheck2,
+  Keyboard,
   Lock,
   Maximize2,
   MessageSquarePlus,
@@ -13,6 +15,7 @@ import {
   Printer,
   RotateCcw,
   Trash2,
+  Volume2,
 } from 'lucide-react';
 import type {
   ProductionProject,
@@ -54,6 +57,8 @@ interface ScreenplayViewProps {
   }) => Promise<void>;
   onToggleResolveNote: (noteId: string, resolved: boolean) => Promise<void>;
   onDeleteNote: (noteId: string) => Promise<void>;
+  onOpenVoiceoverModal: (beatKey?: string) => void;
+  onOpenShortcuts?: () => void;
 }
 
 function triggerDownload(filename: string, content: string, mimeType: string) {
@@ -85,6 +90,8 @@ export function ScreenplayView({
   onAddNote,
   onToggleResolveNote,
   onDeleteNote,
+  onOpenVoiceoverModal,
+  onOpenShortcuts,
 }: ScreenplayViewProps) {
   const scenes = sequence.screenplay || [];
   const allNotes = useMemo(
@@ -145,6 +152,7 @@ export function ScreenplayView({
     if (!isReadingMode) return;
     function onKeyDown(e: KeyboardEvent) {
       if (e.key === 'Escape') {
+        if (document.querySelector('[role="dialog"][aria-modal="true"]')) return;
         onToggleReadingMode(false);
       }
     }
@@ -346,6 +354,15 @@ export function ScreenplayView({
 
           <button
             type="button"
+            onClick={() => onOpenVoiceoverModal(selectedBeat?.beatKey)}
+            className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg border border-[#38B2AC]/45 bg-[#102625] hover:bg-[#163433] text-xs font-medium text-[#5EEAD4] whitespace-nowrap"
+          >
+            <AudioLines className="w-3.5 h-3.5" />
+            <span>Voz Provisional (TTS)</span>
+          </button>
+
+          <button
+            type="button"
             onClick={() => setShowNotesSidebar((v) => !v)}
             aria-pressed={showNotesSidebar}
             className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg border border-white/12 bg-[#14141B] hover:bg-[#1C1C26] text-xs font-medium text-[#E6E2DA] whitespace-nowrap"
@@ -411,6 +428,19 @@ export function ScreenplayView({
             <Printer className="w-3.5 h-3.5 text-[#E5A93C]" />
             <span>Imprimir</span>
           </button>
+
+          {onOpenShortcuts && (
+            <button
+              type="button"
+              onClick={onOpenShortcuts}
+              aria-label="Ver atajos de teclado"
+              title="Atajos de teclado (?)"
+              className="inline-flex items-center gap-1.5 px-2.5 py-2 rounded-lg border border-white/12 bg-[#14141B] hover:bg-[#1C1C26] text-xs font-medium text-[#E6E2DA] whitespace-nowrap"
+            >
+              <Keyboard className="w-3.5 h-3.5 text-[#E5A93C]" />
+              <span>Atajos</span>
+            </button>
+          )}
         </div>
       </div>
 
@@ -482,16 +512,7 @@ export function ScreenplayView({
                           ref={(el) => {
                             beatRefs.current[beatKey] = el;
                           }}
-                          role="button"
-                          tabIndex={0}
-                          onClick={() => selectAndFocusBeat(selectPayload)}
-                          onKeyDown={(e) => {
-                            if (e.key === 'Enter' || e.key === ' ') {
-                              e.preventDefault();
-                              selectAndFocusBeat(selectPayload);
-                            }
-                          }}
-                          className={`group relative rounded-lg px-3 py-2 -mx-3 cursor-pointer transition-colors border ${
+                          className={`group relative rounded-lg px-3 py-2 -mx-3 transition-colors border ${
                             isSelected
                               ? 'border-[#E5A93C]/65 bg-[#1B1810]'
                               : beatNotes.length > 0
@@ -500,10 +521,14 @@ export function ScreenplayView({
                           }`}
                         >
                           <div className="flex items-start justify-between gap-3">
-                            <div className="flex-1 min-w-0">
+                            <button
+                              type="button"
+                              onClick={() => selectAndFocusBeat(selectPayload)}
+                              className="flex-1 min-w-0 text-left cursor-pointer focus-visible:outline-2 focus-visible:outline-[#E5A93C] rounded"
+                            >
                               {beat.type === 'dialogue' ? (
                                 <div
-                                  className={`${typo.dialogueMeasureClass} mx-auto space-y-1 py-0.5`}
+                                  className={`${typo.dialogueMeasureClass} mx-auto space-y-1 py-0.5 text-left`}
                                 >
                                   <div className="text-center font-semibold text-[#F2F0EB] tracking-wider">
                                     {(beat.character || 'PERSONAJE').toUpperCase()}
@@ -526,20 +551,37 @@ export function ScreenplayView({
                               ) : (
                                 <p className="text-[#D4CFC7]">{beat.text}</p>
                               )}
-                            </div>
+                            </button>
 
-                            {beatNotes.length > 0 && (
-                              <span
-                                className={`no-print shrink-0 mt-0.5 px-2 py-0.5 rounded font-mono-tech text-[10px] font-semibold tabular-nums ${
-                                  unresolvedCount > 0
-                                    ? 'bg-[#E5A93C] text-[#0B0B0E]'
-                                    : 'bg-[#102625] text-[#5EEAD4] border border-[#38B2AC]/35'
+                            <div className="no-print flex items-center gap-1.5 shrink-0 mt-0.5">
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setSelectedBeat(selectPayload);
+                                  onOpenVoiceoverModal(beatKey);
+                                }}
+                                aria-label={`Generar voz provisional para Escena ${scene.sceneNumber} línea ${beatIdx + 1}`}
+                                title="Previsualizar voz provisional (TTS)"
+                                className={`p-1.5 rounded border border-white/10 bg-[#0D0D12] text-[#8D8981] hover:text-[#5EEAD4] hover:border-[#38B2AC]/45 transition-opacity ${
+                                  isSelected ? 'opacity-100' : 'opacity-0 group-hover:opacity-100 focus:opacity-100'
                                 }`}
-                                title={`${beatNotes.length} nota(s) al pie vinculadas`}
                               >
-                                [{beatNotes.length}]
-                              </span>
-                            )}
+                                <Volume2 className="w-3.5 h-3.5" />
+                              </button>
+
+                              {beatNotes.length > 0 && (
+                                <span
+                                  className={`px-2 py-0.5 rounded font-mono-tech text-[10px] font-semibold tabular-nums ${
+                                    unresolvedCount > 0
+                                      ? 'bg-[#E5A93C] text-[#0B0B0E]'
+                                      : 'bg-[#102625] text-[#5EEAD4] border border-[#38B2AC]/35'
+                                  }`}
+                                  title={`${beatNotes.length} nota(s) al pie vinculadas`}
+                                >
+                                  [{beatNotes.length}]
+                                </span>
+                              )}
+                            </div>
                           </div>
                         </div>
                       );

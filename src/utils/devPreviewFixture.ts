@@ -1,4 +1,4 @@
-import type { ProductionProject } from '../types/studio';
+import type { ProductionProject } from '../types/studio.ts';
 
 export function buildLocalPreviewFixture(): ProductionProject[] {
   const now = '2026-11-18T12:00:00.000Z';

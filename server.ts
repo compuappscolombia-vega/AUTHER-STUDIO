@@ -26,21 +26,21 @@ import type {
   StoryboardCard,
   VoiceOverTrack,
   VoicePreset,
-} from './src/types/studio';
-import { buildContinuationContext } from './src/utils/studioLogic';
+} from './src/types/studio.ts';
+import { buildContinuationContext } from './src/utils/studioLogic.ts';
 import {
   buildLearningPromptContext,
   extractAutomaticLessons,
   validateLessonInput,
-} from './src/utils/learningEngine';
-import { buildRatedChoiceLessons } from './src/utils/studioIntelligence';
+} from './src/utils/learningEngine.ts';
+import { buildRatedChoiceLessons } from './src/utils/studioIntelligence.ts';
 import {
   buildHyperRealisticResolutionSpec,
   getNanoImageSizeForResolution,
   markChapterCompleted,
   normalizeResolution,
   normalizeTrailerBeats,
-} from './src/utils/productionPipeline';
+} from './src/utils/productionPipeline.ts';
 import {
   DEFAULT_ADMIN_AGENT_PROFILE,
   buildAdminTrainingPromptBlock,
@@ -48,8 +48,8 @@ import {
   normalizeAdminAgentProfile,
   normalizeFourKeyStoryboardFrames,
   validateAdminDirective,
-} from './src/utils/adminAndStoryboardLogic';
-import { buildLocalPreviewFixture } from './src/utils/devPreviewFixture';
+} from './src/utils/adminAndStoryboardLogic.ts';
+import { buildLocalPreviewFixture } from './src/utils/devPreviewFixture.ts';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);

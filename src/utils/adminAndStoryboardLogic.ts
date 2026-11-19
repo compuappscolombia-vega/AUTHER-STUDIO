@@ -5,8 +5,8 @@ import type {
   ResolutionTier,
   SequenceLocalMetrics,
   StoryboardCard,
-} from '../types/studio';
-import { buildHyperRealisticResolutionSpec, normalizeResolution } from './productionPipeline';
+} from '../types/studio.ts';
+import { buildHyperRealisticResolutionSpec, normalizeResolution } from './productionPipeline.ts';
 
 export const DEFAULT_ADMIN_AGENT_PROFILE: AdminAgentProfile = {
   strictContinuityMode: true,
