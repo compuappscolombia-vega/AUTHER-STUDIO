@@ -21,9 +21,9 @@ import { auth } from '../firebase';
 import { ensureUserProfileInFirestore } from '../services/firestoreSync';
 import type { UserRole } from '../types/studio';
 
-const ADMIN_SESSION_STORAGE_KEY = 'auteur_admin_session_v1';
+const LEGACY_ADMIN_SESSION_KEY = 'auteur_admin_session_v1';
 
-interface StoredAdminSession {
+interface AdminSession {
   uid: string;
   displayName: string;
   email: string;
@@ -37,6 +37,7 @@ interface AuthContextValue {
   isVerified: boolean;
   userRole: UserRole;
   isAdminSession: boolean;
+  adminToken: string | null;
   isLocalDevPreview: boolean;
   signInWithGoogle: () => Promise<void>;
   signInWithEmail: (email: string, password: string) => Promise<void>;
@@ -45,7 +46,7 @@ interface AuthContextValue {
     email: string;
     password: string;
   }) => Promise<void>;
-  signInAsAdmin: (params?: { email?: string; displayName?: string }) => Promise<void>;
+  signInAsAdmin: (params: { identifier: string; password: string }) => Promise<boolean>;
   resendVerificationEmail: () => Promise<void>;
   refreshAuthUser: () => Promise<boolean>;
   logout: () => Promise<void>;
@@ -61,32 +62,11 @@ function detectLocalDevPreview(): boolean {
   return new URLSearchParams(window.location.search).get('autostart') === '1';
 }
 
-function readStoredAdminSession(): StoredAdminSession | null {
-  if (typeof window === 'undefined' || !window.localStorage) return null;
-  try {
-    const raw = window.localStorage.getItem(ADMIN_SESSION_STORAGE_KEY);
-    if (!raw) return null;
-    const parsed = JSON.parse(raw) as Partial<StoredAdminSession>;
-    if (parsed && parsed.role === 'admin' && typeof parsed.uid === 'string') {
-      return {
-        uid: parsed.uid,
-        displayName: parsed.displayName || 'Administrador AUTEUR',
-        email: parsed.email || 'compuappscolombia@gmail.com',
-        role: 'admin',
-        emailVerified: true,
-      };
-    }
-    return null;
-  } catch {
-    return null;
-  }
-}
-
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [isLocalDevPreview] = useState<boolean>(() => detectLocalDevPreview());
-  const [adminSession, setAdminSession] = useState<StoredAdminSession | null>(() =>
-    readStoredAdminSession()
-  );
+  // Admin credentials/token live strictly in React memory (never persisted in localStorage)
+  const [adminSession, setAdminSession] = useState<AdminSession | null>(null);
+  const [adminToken, setAdminToken] = useState<string | null>(null);
   const [firebaseUser, setFirebaseUser] = useState<User | null>(() =>
     detectLocalDevPreview()
       ? ({
@@ -98,9 +78,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       : null
   );
   const [, setAuthRevision] = useState(0);
-  const [loading, setLoading] = useState(
-    () => !detectLocalDevPreview() && !readStoredAdminSession()
-  );
+  const [loading, setLoading] = useState(() => !detectLocalDevPreview());
+
+  useEffect(() => {
+    try {
+      window.localStorage?.removeItem(LEGACY_ADMIN_SESSION_KEY);
+    } catch {
+      // Ignore storage access failures
+    }
+  }, []);
 
   useEffect(() => {
     if (isLocalDevPreview) {
@@ -122,8 +108,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [isLocalDevPreview]);
 
   async function signInWithGoogle() {
-    localStorage.removeItem(ADMIN_SESSION_STORAGE_KEY);
     setAdminSession(null);
+    setAdminToken(null);
     const provider = new GoogleAuthProvider();
     const cred = await signInWithPopup(auth, provider);
     if (cred.user && cred.user.emailVerified) {
@@ -132,8 +118,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }
 
   async function signInWithEmail(email: string, password: string) {
-    localStorage.removeItem(ADMIN_SESSION_STORAGE_KEY);
     setAdminSession(null);
+    setAdminToken(null);
     const cred = await signInWithEmailAndPassword(auth, email.trim(), password);
     if (cred.user && cred.user.emailVerified) {
       await ensureUserProfileInFirestore(cred.user);
@@ -145,8 +131,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     email: string;
     password: string;
   }) {
-    localStorage.removeItem(ADMIN_SESSION_STORAGE_KEY);
     setAdminSession(null);
+    setAdminToken(null);
     const cred = await createUserWithEmailAndPassword(
       auth,
       params.email.trim(),
@@ -160,23 +146,29 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setAuthRevision((r) => r + 1);
   }
 
-  async function signInAsAdmin(params?: { email?: string; displayName?: string }) {
+  async function signInAsAdmin(params: {
+    identifier: string;
+    password: string;
+  }): Promise<boolean> {
     const res = await fetch('/api/admin/login', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        email: params?.email?.trim() || 'compuappscolombia@gmail.com',
-        displayName: params?.displayName?.trim() || 'Administrador AUTEUR',
+        identifier: params.identifier.trim(),
+        password: params.password,
       }),
     });
-    const data = await res.json();
-    if (!res.ok || !data.session) {
-      throw new Error(data.error || 'No se pudo iniciar la sesión de Administrador.');
+    if (res.status === 401) {
+      return false;
     }
-    const nextAdmin = data.session as StoredAdminSession;
-    localStorage.setItem(ADMIN_SESSION_STORAGE_KEY, JSON.stringify(nextAdmin));
-    setAdminSession(nextAdmin);
+    const data = await res.json();
+    if (!res.ok || !data.session || !data.token) {
+      throw new Error(data.error || 'No se pudo completar la autenticación.');
+    }
+    setAdminToken(String(data.token));
+    setAdminSession(data.session as AdminSession);
     setLoading(false);
+    return true;
   }
 
   async function resendVerificationEmail() {
@@ -198,22 +190,23 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }
 
   async function logout() {
-    localStorage.removeItem(ADMIN_SESSION_STORAGE_KEY);
     setAdminSession(null);
+    setAdminToken(null);
     if (auth.currentUser) {
       await signOut(auth);
     }
   }
 
-  const isAdminSession = Boolean(adminSession);
-  const activeUser: User | null = adminSession
-    ? ({
-        uid: adminSession.uid,
-        displayName: adminSession.displayName,
-        email: adminSession.email,
-        emailVerified: true,
-      } as unknown as User)
-    : firebaseUser;
+  const isAdminSession = Boolean(adminSession && adminToken);
+  const activeUser: User | null =
+    isAdminSession && adminSession
+      ? ({
+          uid: adminSession.uid,
+          displayName: adminSession.displayName,
+          email: adminSession.email,
+          emailVerified: true,
+        } as unknown as User)
+      : firebaseUser;
 
   const userRole: UserRole = isAdminSession ? 'admin' : 'director';
 
@@ -225,6 +218,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         isVerified: Boolean(activeUser && (activeUser.emailVerified || isAdminSession)),
         userRole,
         isAdminSession,
+        adminToken,
         isLocalDevPreview,
         signInWithGoogle,
         signInWithEmail,

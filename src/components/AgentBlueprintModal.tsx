@@ -63,32 +63,32 @@ export function AgentBlueprintModal({
       role="dialog"
       aria-modal="true"
       aria-labelledby="agent-blueprint-heading"
-      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80"
+      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 dark:bg-black/80"
     >
-      <div className="w-full max-w-2xl rounded-xl border border-white/15 bg-[#131318] p-6">
+      <div className="w-full max-w-2xl rounded-xl border border-[#DCD6CA] dark:border-white/15 bg-[#FFFFFF] dark:bg-[#131318] p-6 shadow-2xl">
         <div className="flex items-center justify-between mb-3">
-          <h2 id="agent-blueprint-heading" className="font-display text-lg font-semibold text-[#F2F0EB]">
+          <h2 id="agent-blueprint-heading" className="font-display text-lg font-semibold text-[#18181B] dark:text-[#F2F0EB]">
             Plantilla para Google Cloud Agent Platform Studio
           </h2>
           <button
             type="button"
             onClick={onClose}
             aria-label="Cerrar plantilla"
-            className="p-2 rounded-lg text-[#9A968E] hover:text-[#F2F0EB] hover:bg-white/5"
+            className="p-2 rounded-lg text-[#57534E] dark:text-[#9A968E] hover:text-[#18181B] dark:hover:text-[#F2F0EB] hover:bg-black/5 dark:hover:bg-white/5"
           >
             <X className="w-4 h-4" />
           </button>
         </div>
 
-        <p className="text-xs text-[#A7A299] leading-relaxed mb-4">
+        <p className="text-xs text-[#52525B] dark:text-[#A7A299] leading-relaxed mb-4">
           Copia esta configuración para desplegar el mismo agente productor en{' '}
-          <span className="font-mono-tech text-[#E5A93C]">
+          <span className="font-mono-tech text-amber-700 dark:text-[#E5A93C]">
             console.cloud.google.com/agent-platform/studio
           </span>{' '}
           con un Data Store RAG para libros extensos.
         </p>
 
-        <pre className="max-h-72 overflow-auto rounded-lg border border-white/10 bg-[#0B0B0E] p-4 text-xs font-mono-tech text-[#D4CFC7] leading-relaxed">
+        <pre className="max-h-72 overflow-auto rounded-lg border border-[#DCD6CA] dark:border-white/10 bg-[#FAF8F4] dark:bg-[#0B0B0E] p-4 text-xs font-mono-tech text-[#27272A] dark:text-[#D4CFC7] leading-relaxed">
           {blueprint}
         </pre>
 
@@ -96,7 +96,7 @@ export function AgentBlueprintModal({
           <button
             type="button"
             onClick={onClose}
-            className="px-4 py-2 rounded-lg border border-white/15 text-xs font-medium text-[#C8C3BA] hover:bg-white/5"
+            className="px-4 py-2 rounded-lg border border-[#D6D1C7] dark:border-white/15 text-xs font-medium text-[#3F3F46] dark:text-[#C8C3BA] hover:bg-black/5 dark:hover:bg-white/5"
           >
             Cerrar
           </button>

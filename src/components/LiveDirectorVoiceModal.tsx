@@ -294,17 +294,17 @@ export function LiveDirectorVoiceModal({
       role="dialog"
       aria-modal="true"
       aria-labelledby="live-voice-heading"
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 p-4"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 dark:bg-black/85 p-4"
     >
-      <div className="w-full max-w-2xl rounded-xl border border-white/15 bg-[#121218] overflow-hidden flex flex-col max-h-[88vh]">
-        <div className="px-5 py-4 border-b border-white/10 flex items-center justify-between gap-3">
+      <div className="w-full max-w-2xl rounded-xl border border-[#DCD6CA] dark:border-white/15 bg-[#FFFFFF] dark:bg-[#121218] overflow-hidden flex flex-col max-h-[88vh] shadow-2xl">
+        <div className="px-5 py-4 border-b border-[#E2DDD3] dark:border-white/10 flex items-center justify-between gap-3">
           <div className="flex items-center gap-2.5">
-            <Volume2 className="w-5 h-5 text-[#38B2AC]" />
+            <Volume2 className="w-5 h-5 text-teal-600 dark:text-[#38B2AC]" />
             <div>
-              <h2 id="live-voice-heading" className="font-display text-base font-semibold text-[#F2F0EB]">
+              <h2 id="live-voice-heading" className="font-display text-base font-semibold text-[#18181B] dark:text-[#F2F0EB]">
                 Sala de Dirección en Vivo (Gemini Live 3.8)
               </h2>
-              <p className="text-xs text-[#8D8981]">
+              <p className="text-xs text-[#57534E] dark:text-[#8D8981]">
                 Conversa por voz en tiempo real para definir encuadres, diálogos o resolver dudas paso a paso.
               </p>
             </div>
@@ -313,16 +313,16 @@ export function LiveDirectorVoiceModal({
             type="button"
             onClick={handleClose}
             aria-label="Cerrar sala de voz en vivo"
-            className="p-2 rounded-lg text-[#9A968E] hover:text-[#F2F0EB] hover:bg-white/5"
+            className="p-2 rounded-lg text-[#57534E] dark:text-[#9A968E] hover:text-[#18181B] dark:hover:text-[#F2F0EB] hover:bg-black/5 dark:hover:bg-white/5"
           >
             <X className="w-4 h-4" />
           </button>
         </div>
 
         <div className="p-5 space-y-4 overflow-y-auto flex-1">
-          <div className="flex flex-wrap items-center justify-between gap-3 p-3.5 rounded-xl border border-white/10 bg-[#0B0B0E]">
+          <div className="flex flex-wrap items-center justify-between gap-3 p-3.5 rounded-xl border border-[#DCD6CA] dark:border-white/10 bg-[#FAF8F4] dark:bg-[#0B0B0E]">
             <div className="flex items-center gap-2.5">
-              <label htmlFor="live-voice-preset" className="text-xs text-[#C8C3BA]">
+              <label htmlFor="live-voice-preset" className="text-xs text-[#3F3F46] dark:text-[#C8C3BA]">
                 Voz del Director:
               </label>
               <select
@@ -330,7 +330,7 @@ export function LiveDirectorVoiceModal({
                 value={voicePreset}
                 disabled={status === 'connected' || status === 'connecting'}
                 onChange={(e) => setVoicePreset(e.target.value as VoicePreset)}
-                className="rounded-lg border border-white/15 bg-[#14141B] px-2.5 py-1.5 text-xs text-[#F2F0EB]"
+                className="rounded-lg border border-[#D6D1C7] dark:border-white/15 bg-[#FFFFFF] dark:bg-[#14141B] px-2.5 py-1.5 text-xs text-[#18181B] dark:text-[#F2F0EB]"
               >
                 {VOICE_PRESET_OPTIONS.map((v) => (
                   <option key={v.value} value={v.value}>
@@ -348,11 +348,11 @@ export function LiveDirectorVoiceModal({
                     onClick={() => setMuted((m) => !m)}
                     className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-xs font-medium ${
                       muted
-                        ? 'border-[#EF4444]/40 bg-[#3B1515]/50 text-[#FCA5A5]'
-                        : 'border-white/15 bg-[#16161E] text-[#F2F0EB]'
+                        ? 'border-red-300 dark:border-[#EF4444]/40 bg-red-50 dark:bg-[#3B1515]/50 text-red-700 dark:text-[#FCA5A5]'
+                        : 'border-[#D6D1C7] dark:border-white/15 bg-[#FFFFFF] dark:bg-[#16161E] text-[#18181B] dark:text-[#F2F0EB]'
                     }`}
                   >
-                    {muted ? <MicOff className="w-3.5 h-3.5" /> : <Mic className="w-3.5 h-3.5 text-[#38B2AC]" />}
+                    {muted ? <MicOff className="w-3.5 h-3.5" /> : <Mic className="w-3.5 h-3.5 text-teal-600 dark:text-[#38B2AC]" />}
                     <span>{muted ? 'Micrófono silenciado' : 'Micrófono activo'}</span>
                   </button>
                   <button
@@ -383,16 +383,16 @@ export function LiveDirectorVoiceModal({
           {errorMsg && (
             <div
               role="alert"
-              className="rounded-lg border border-[#EF4444]/35 bg-[#3B1515]/50 px-4 py-3 text-xs text-[#FCA5A5]"
+              className="rounded-lg border border-red-300 dark:border-[#EF4444]/35 bg-red-50 dark:bg-[#3B1515]/50 px-4 py-3 text-xs text-red-700 dark:text-[#FCA5A5]"
             >
               {errorMsg}
             </div>
           )}
 
           {/* Live Transcript */}
-          <div className="rounded-xl border border-white/10 bg-[#0B0B0E] p-4 min-h-[210px] max-h-[290px] overflow-y-auto space-y-2.5">
+          <div className="rounded-xl border border-[#DCD6CA] dark:border-white/10 bg-[#FAF8F4] dark:bg-[#0B0B0E] p-4 min-h-[210px] max-h-[290px] overflow-y-auto space-y-2.5">
             {entries.length === 0 ? (
-              <p className="text-xs text-[#8D8981] text-center py-10 leading-relaxed">
+              <p className="text-xs text-[#57534E] dark:text-[#8D8981] text-center py-10 leading-relaxed">
                 Pulsa «Iniciar Conversación por Voz» y pregunta libremente al Agente Director
                 sobre el ritmo de la escena, el uso de lentes o los pasos para entregar tu filme.
               </p>
@@ -402,11 +402,11 @@ export function LiveDirectorVoiceModal({
                   key={item.id}
                   className={`rounded-lg px-3 py-2 text-xs leading-relaxed ${
                     item.speaker === 'director'
-                      ? 'bg-[#17171F] border border-[#E5A93C]/25 text-[#F2F0EB]'
-                      : 'bg-[#102625] border border-[#38B2AC]/25 text-[#D1FAE5] ml-6'
+                      ? 'bg-[#FFFFFF] border border-amber-500/40 text-[#18181B] dark:bg-[#17171F] dark:border-[#E5A93C]/25 dark:text-[#F2F0EB]'
+                      : 'bg-teal-50 border border-teal-600/35 text-teal-950 dark:bg-[#102625] dark:border-[#38B2AC]/25 dark:text-[#D1FAE5] ml-6'
                   }`}
                 >
-                  <span className="font-mono-tech text-[10px] uppercase tracking-wider text-[#E5A93C] block mb-0.5">
+                  <span className="font-mono-tech text-[10px] uppercase tracking-wider text-amber-700 dark:text-[#E5A93C] block mb-0.5">
                     {item.speaker === 'director' ? 'Agente Director AUTEUR' : 'Tú'}
                   </span>
                   {item.text}
@@ -422,11 +422,11 @@ export function LiveDirectorVoiceModal({
                 value={textInput}
                 onChange={(e) => setTextInput(e.target.value)}
                 placeholder="También puedes escribir una indicación al vuelo..."
-                className="flex-1 rounded-lg border border-white/15 bg-[#0B0B0E] px-3 py-2 text-xs text-[#F2F0EB] placeholder:text-[#6E6A63] focus:border-[#38B2AC] focus:outline-none"
+                className="flex-1 rounded-lg border border-[#D6D1C7] dark:border-white/15 bg-[#FFFFFF] dark:bg-[#0B0B0E] px-3 py-2 text-xs text-[#18181B] dark:text-[#F2F0EB] placeholder:text-[#78746C] dark:placeholder:text-[#6E6A63] focus:border-[#38B2AC] focus:outline-none"
               />
               <button
                 type="submit"
-                className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg border border-[#38B2AC]/45 bg-[#102625] hover:bg-[#163433] text-xs font-medium text-[#5EEAD4]"
+                className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg border border-teal-600/45 dark:border-[#38B2AC]/45 bg-teal-50 dark:bg-[#102625] hover:bg-teal-100 dark:hover:bg-[#163433] text-xs font-medium text-teal-800 dark:text-[#5EEAD4]"
               >
                 <Send className="w-3.5 h-3.5" />
                 <span>Enviar</span>

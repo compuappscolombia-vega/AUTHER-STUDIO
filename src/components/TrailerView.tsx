@@ -10,12 +10,15 @@ import {
   Music,
   Pause,
   Play,
+  PlugZap,
   RotateCcw,
   Sparkles,
   Video,
   X,
 } from 'lucide-react';
 import type {
+  ApiCapability,
+  ApiProviderPublicSummary,
   ProductionProject,
   ProjectTrailer,
   ResolutionTier,
@@ -36,18 +39,22 @@ interface TrailerViewProps {
   userId: string;
   project: ProductionProject;
   studioSettings: StudioSettings;
+  providersStatus?: Record<ApiCapability, ApiProviderPublicSummary> | null;
   onEnsureProjectSynced: () => Promise<void>;
   onProjectUpdated: (project: ProductionProject) => Promise<void>;
   onGoToVision: () => void;
+  onOpenSettings?: () => void;
 }
 
 export function TrailerView({
   userId,
   project,
   studioSettings,
+  providersStatus,
   onEnsureProjectSynced,
   onProjectUpdated,
   onGoToVision,
+  onOpenSettings,
 }: TrailerViewProps) {
   const readiness = validateTrailerReadiness(project);
   const trailer: ProjectTrailer | undefined = project.trailer;
@@ -69,6 +76,30 @@ export function TrailerView({
   const [statusNotice, setStatusNotice] = useState<string | null>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [copiedDossier, setCopiedDossier] = useState(false);
+
+  const [localProviders, setLocalProviders] = useState<
+    Record<ApiCapability, ApiProviderPublicSummary> | null
+  >(providersStatus || null);
+
+  useEffect(() => {
+    if (providersStatus) setLocalProviders(providersStatus);
+  }, [providersStatus]);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetch('/api/providers', { headers: { 'x-user-id': userId } })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d: { providers?: Record<ApiCapability, ApiProviderPublicSummary> } | null) => {
+        if (!cancelled && d?.providers) setLocalProviders(d.providers);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [userId]);
+
+  const activeImgProv = localProviders?.image;
+  const activeVidProv = localProviders?.video;
 
   // 30s Screening Room playback state
   const [isPlaying, setIsPlaying] = useState(false);
@@ -409,31 +440,50 @@ export function TrailerView({
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div>
             <div className="flex items-center gap-2">
-              <Clapperboard className="w-4 h-4 text-[#E5A93C]" />
-              <h2 id="trailer-heading" className="font-display text-xl font-semibold text-[#F2F0EB]">
+              <Clapperboard className="w-4 h-4 text-amber-600 dark:text-[#E5A93C]" />
+              <h2 id="trailer-heading" className="font-display text-xl font-semibold text-[#18181B] dark:text-[#F2F0EB]">
                 Agente Director de Tráiler Cinematográfico (30s)
               </h2>
             </div>
-            <p className="text-xs text-[#8D8981] mt-1">
-              Ensambla el teaser oficial de 30 segundos: primero diseña los 6 cortes y luego genera su Voz en Off WAV, Música Lyria y clips de video Omni Flash.
+            <p className="text-xs text-[#57534E] dark:text-[#8D8981] mt-1">
+              Ensambla el teaser oficial de 30s usando tus APIs suministradas · Imagen:{' '}
+              <span className="font-mono-tech">
+                {activeImgProv?.configured ? activeImgProv.label : 'Sin asignar'}
+              </span>
+              {' · '}Video:{' '}
+              <span className="font-mono-tech">
+                {activeVidProv?.configured ? activeVidProv.label : 'Sin asignar'}
+              </span>
             </p>
           </div>
 
-          <div className="text-xs font-mono-tech text-[#8D8981] tabular-nums">
-            {readiness.approvedSequences.length}{' '}
-            {readiness.approvedSequences.length === 1
-              ? 'escena aprobada'
-              : 'escenas aprobadas'}
+          <div className="flex items-center gap-2.5">
+            {onOpenSettings && (
+              <button
+                type="button"
+                onClick={onOpenSettings}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-[#D6D1C7] dark:border-white/15 bg-[#FFFFFF] dark:bg-[#16161E] hover:border-[#E5A93C] text-xs font-medium text-[#18181B] dark:text-[#F2F0EB] whitespace-nowrap"
+              >
+                <PlugZap className="w-3.5 h-3.5 text-amber-600 dark:text-[#E5A93C]" />
+                <span>Configurar APIs</span>
+              </button>
+            )}
+            <div className="text-xs font-mono-tech text-[#57534E] dark:text-[#8D8981] tabular-nums">
+              {readiness.approvedSequences.length}{' '}
+              {readiness.approvedSequences.length === 1
+                ? 'escena aprobada'
+                : 'escenas aprobadas'}
+            </div>
           </div>
         </div>
 
         {/* Readiness Banner or Controls */}
         {!readiness.ready ? (
-          <div className="p-6 rounded-xl border border-[#E5A93C]/30 bg-[#18150E] space-y-3">
-            <div className="font-display text-base font-semibold text-[#F2F0EB]">
+          <div className="p-6 rounded-xl border border-amber-500/35 dark:border-[#E5A93C]/30 bg-amber-50/70 dark:bg-[#18150E] space-y-3">
+            <div className="font-display text-base font-semibold text-[#18181B] dark:text-[#F2F0EB]">
               Aún falta aprobar una secuencia en Versión Final
             </div>
-            <p className="text-xs text-[#D4CFC7] leading-relaxed max-w-2xl">
+            <p className="text-xs text-[#27272A] dark:text-[#D4CFC7] leading-relaxed max-w-2xl">
               {readiness.reason} El Agente Director utiliza únicamente secuencias aprobadas para ensamblar el tráiler oficial de 30 segundos con fidelidad a la Biblia de Continuidad.
             </p>
             <div className="flex flex-wrap items-center gap-3">
@@ -455,38 +505,38 @@ export function TrailerView({
               <button
                 type="button"
                 onClick={onGoToVision}
-                className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg border border-white/15 bg-[#14141B] hover:bg-[#1E1E29] text-[#F2F0EB] text-xs font-medium"
+                className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg border border-[#D6D1C7] dark:border-white/15 bg-[#FFFFFF] dark:bg-[#14141B] hover:bg-[#FAF8F4] dark:hover:bg-[#1E1E29] text-[#18181B] dark:text-[#F2F0EB] text-xs font-medium"
               >
                 <span>Ir a Dirección de secuencia</span>
               </button>
             </div>
           </div>
         ) : (
-          <div className="p-4 rounded-xl border border-white/10 bg-[#131318] space-y-4">
+          <div className="p-4 rounded-xl border border-[#DCD6CA] dark:border-white/10 bg-[#FFFFFF] dark:bg-[#131318] space-y-4 shadow-xs dark:shadow-none">
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
               <div>
-                <div className="font-medium text-[#C8C3BA] mb-1">
+                <div className="font-medium text-[#3F3F46] dark:text-[#C8C3BA] mb-1">
                   Fuentes Aprobadas Conectadas ({readiness.approvedSequences.length})
                 </div>
-                <p className="text-[#9A968E] leading-relaxed">
+                <p className="text-[#57534E] dark:text-[#9A968E] leading-relaxed">
                   {readiness.approvedSequences.map((s) => s.title).join(' · ')}
                 </p>
               </div>
               <div>
-                <div className="font-medium text-[#C8C3BA] mb-1">
+                <div className="font-medium text-[#3F3F46] dark:text-[#C8C3BA] mb-1">
                   Biblia de Continuidad Activa
                 </div>
-                <p className="text-[#9A968E] leading-relaxed line-clamp-2">
+                <p className="text-[#57534E] dark:text-[#9A968E] leading-relaxed line-clamp-2">
                   {project.continuityBible || 'Reglas base definidas en las escenas finales.'}
                 </p>
               </div>
             </div>
 
-            <div className="pt-3 border-t border-white/10 grid grid-cols-1 sm:grid-cols-4 gap-3 items-end">
+            <div className="pt-3 border-t border-[#E2DDD3] dark:border-white/10 grid grid-cols-1 sm:grid-cols-4 gap-3 items-end">
               <div>
                 <label
                   htmlFor="trailer-tone-select"
-                  className="block text-[11px] font-medium text-[#C8C3BA] mb-1"
+                  className="block text-[11px] font-medium text-[#3F3F46] dark:text-[#C8C3BA] mb-1"
                 >
                   Tono de Montaje
                 </label>
@@ -494,7 +544,7 @@ export function TrailerView({
                   id="trailer-tone-select"
                   value={tone}
                   onChange={(e) => setTone(e.target.value)}
-                  className="w-full rounded-lg border border-white/12 bg-[#0B0B0E] px-2.5 py-2 text-xs text-[#F2F0EB] focus:border-[#E5A93C] focus:outline-none"
+                  className="w-full rounded-lg border border-[#D6D1C7] dark:border-white/12 bg-[#FFFFFF] dark:bg-[#0B0B0E] px-2.5 py-2 text-xs text-[#18181B] dark:text-[#F2F0EB] focus:border-[#E5A93C] focus:outline-none"
                 >
                   {TRAILER_TONE_OPTIONS.map((t) => (
                     <option key={t} value={t}>
@@ -507,7 +557,7 @@ export function TrailerView({
               <div>
                 <label
                   htmlFor="trailer-resolution-select"
-                  className="block text-[11px] font-medium text-[#C8C3BA] mb-1"
+                  className="block text-[11px] font-medium text-[#3F3F46] dark:text-[#C8C3BA] mb-1"
                 >
                   Ultra Definición
                 </label>
@@ -515,7 +565,7 @@ export function TrailerView({
                   id="trailer-resolution-select"
                   value={targetResolution}
                   onChange={(e) => setTargetResolution(e.target.value as ResolutionTier)}
-                  className="w-full rounded-lg border border-white/12 bg-[#0B0B0E] px-2.5 py-2 text-xs font-mono-tech text-[#F2F0EB] focus:border-[#E5A93C] focus:outline-none"
+                  className="w-full rounded-lg border border-[#D6D1C7] dark:border-white/12 bg-[#FFFFFF] dark:bg-[#0B0B0E] px-2.5 py-2 text-xs font-mono-tech text-[#18181B] dark:text-[#F2F0EB] focus:border-[#E5A93C] focus:outline-none"
                 >
                   {RESOLUTION_OPTIONS.map((opt) => (
                     <option key={opt.value} value={opt.value}>
@@ -528,7 +578,7 @@ export function TrailerView({
               <div>
                 <label
                   htmlFor="trailer-voice-select"
-                  className="block text-[11px] font-medium text-[#C8C3BA] mb-1"
+                  className="block text-[11px] font-medium text-[#3F3F46] dark:text-[#C8C3BA] mb-1"
                 >
                   Voz en Off Principal
                 </label>
@@ -536,7 +586,7 @@ export function TrailerView({
                   id="trailer-voice-select"
                   value={voicePreset}
                   onChange={(e) => setVoicePreset(e.target.value as VoicePreset)}
-                  className="w-full rounded-lg border border-white/12 bg-[#0B0B0E] px-2.5 py-2 text-xs text-[#F2F0EB] focus:border-[#E5A93C] focus:outline-none"
+                  className="w-full rounded-lg border border-[#D6D1C7] dark:border-white/12 bg-[#FFFFFF] dark:bg-[#0B0B0E] px-2.5 py-2 text-xs text-[#18181B] dark:text-[#F2F0EB] focus:border-[#E5A93C] focus:outline-none"
                 >
                   {VOICE_PRESET_OPTIONS.map((v) => (
                     <option key={v.value} value={v.value}>
@@ -566,13 +616,13 @@ export function TrailerView({
         )}
 
         {statusNotice && (
-          <div className="rounded-lg border border-[#38B2AC]/35 bg-[#122625] px-4 py-3 text-xs text-[#A7F3D0] flex items-center justify-between gap-3">
+          <div className="rounded-lg border border-teal-300 dark:border-[#38B2AC]/35 bg-teal-50 dark:bg-[#122625] px-4 py-3 text-xs text-teal-900 dark:text-[#A7F3D0] flex items-center justify-between gap-3">
             <span>{statusNotice}</span>
             <button
               type="button"
               onClick={() => setStatusNotice(null)}
               aria-label="Cerrar aviso"
-              className="p-1 rounded hover:bg-white/10"
+              className="p-1 rounded hover:bg-black/5 dark:hover:bg-white/10"
             >
               <X className="w-3.5 h-3.5" />
             </button>
@@ -582,17 +632,28 @@ export function TrailerView({
         {errorMsg && (
           <div
             role="alert"
-            className="rounded-lg border border-[#EF4444]/35 bg-[#3B1515]/50 px-4 py-3 text-xs text-[#FCA5A5] flex items-center justify-between gap-3"
+            className="rounded-lg border border-red-300 dark:border-[#EF4444]/35 bg-red-50 dark:bg-[#3B1515]/50 px-4 py-3 text-xs text-red-700 dark:text-[#FCA5A5] flex flex-wrap items-center justify-between gap-3"
           >
-            <span>{errorMsg}</span>
-            <button
-              type="button"
-              onClick={() => setErrorMsg(null)}
-              aria-label="Cerrar error de tráiler"
-              className="p-1 rounded hover:bg-white/10"
-            >
-              <X className="w-3.5 h-3.5" />
-            </button>
+            <span className="flex-1 min-w-[200px]">{errorMsg}</span>
+            <div className="flex items-center gap-2 shrink-0">
+              {onOpenSettings && (
+                <button
+                  type="button"
+                  onClick={onOpenSettings}
+                  className="px-2.5 py-1 rounded-md bg-[#E5A93C] hover:bg-[#EDA949] text-[#0B0B0E] text-[11px] font-semibold whitespace-nowrap"
+                >
+                  Configurar APIs ahora
+                </button>
+              )}
+              <button
+                type="button"
+                onClick={() => setErrorMsg(null)}
+                aria-label="Cerrar error de tráiler"
+                className="p-1 rounded hover:bg-black/5 dark:hover:bg-white/10"
+              >
+                <X className="w-3.5 h-3.5" />
+              </button>
+            </div>
           </div>
         )}
       </section>
@@ -602,16 +663,16 @@ export function TrailerView({
         <>
           <section
             aria-label="Sala de proyección de tráiler de 30 segundos"
-            className="rounded-xl border border-white/10 bg-[#101015] overflow-hidden"
+            className="rounded-xl border border-[#DCD6CA] dark:border-white/10 bg-[#FFFFFF] dark:bg-[#101015] overflow-hidden shadow-xs dark:shadow-none"
           >
-            <div className="px-5 py-3.5 border-b border-white/10 flex flex-wrap items-center justify-between gap-3">
+            <div className="px-5 py-3.5 border-b border-[#E2DDD3] dark:border-white/10 flex flex-wrap items-center justify-between gap-3">
               <div>
-                <h3 className="font-display text-base font-semibold text-[#F2F0EB]">
+                <h3 className="font-display text-base font-semibold text-[#18181B] dark:text-[#F2F0EB]">
                   {trailer.title}
                 </h3>
-                <p className="text-xs text-[#E5A93C] italic">{trailer.tagline}</p>
+                <p className="text-xs text-amber-700 dark:text-[#E5A93C] italic">{trailer.tagline}</p>
               </div>
-              <div className="flex flex-wrap items-center gap-2 text-xs font-mono-tech text-[#8D8981] tabular-nums">
+              <div className="flex flex-wrap items-center gap-2 text-xs font-mono-tech text-[#57534E] dark:text-[#8D8981] tabular-nums">
                 <span>{trailer.tone}</span>
                 <span aria-hidden="true">·</span>
                 <span>{trailer.targetResolution}</span>
@@ -621,7 +682,7 @@ export function TrailerView({
             </div>
 
             {/* Active 16:9 Cinema Stage */}
-            <div className="relative aspect-[16/9] max-h-[340px] w-full bg-[#070709] border-b border-white/10 overflow-hidden">
+            <div className="relative aspect-[16/9] max-h-[340px] w-full bg-[#070709] border-b border-[#E2DDD3] dark:border-white/10 overflow-hidden">
               {activeBeat?.videoUrl ? (
                 <video
                   key={activeBeat.videoUrl}
@@ -698,13 +759,13 @@ export function TrailerView({
                   type="button"
                   onClick={handleResetPlayback}
                   aria-label="Reiniciar tráiler a 00:00"
-                  className="p-2 rounded-lg border border-white/12 bg-[#16161E] hover:bg-[#1E1E28] text-[#D4CFC7]"
+                  className="p-2 rounded-lg border border-[#D6D1C7] dark:border-white/12 bg-[#FAF8F4] dark:bg-[#16161E] hover:bg-[#EFECE4] dark:hover:bg-[#1E1E28] text-[#27272A] dark:text-[#D4CFC7]"
                 >
                   <RotateCcw className="w-3.5 h-3.5" />
                 </button>
 
                 <div className="flex-1 min-w-[180px] flex items-center gap-3">
-                  <span className="text-xs font-mono-tech text-[#E5A93C] tabular-nums">
+                  <span className="text-xs font-mono-tech text-amber-700 dark:text-[#E5A93C] tabular-nums">
                     {formatTimecodeSec(currentTimeSec)}
                   </span>
                   <input
@@ -722,7 +783,7 @@ export function TrailerView({
                     }}
                     className="w-full accent-[#E5A93C]"
                   />
-                  <span className="text-xs font-mono-tech text-[#8D8981] tabular-nums">
+                  <span className="text-xs font-mono-tech text-[#57534E] dark:text-[#8D8981] tabular-nums">
                     00:30
                   </span>
                 </div>
@@ -730,16 +791,16 @@ export function TrailerView({
                 <button
                   type="button"
                   onClick={handleCopyTrailerDossier}
-                  className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg border border-white/12 bg-[#16161E] hover:bg-[#1E1E28] text-xs font-medium text-[#E6E2DA] whitespace-nowrap"
+                  className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg border border-[#D6D1C7] dark:border-white/12 bg-[#FAF8F4] dark:bg-[#16161E] hover:bg-[#EFECE4] dark:hover:bg-[#1E1E28] text-xs font-medium text-[#18181B] dark:text-[#E6E2DA] whitespace-nowrap"
                 >
                   {copiedDossier ? (
                     <>
-                      <Check className="w-3.5 h-3.5 text-[#22C55E]" />
+                      <Check className="w-3.5 h-3.5 text-emerald-600 dark:text-[#22C55E]" />
                       <span>Dossier copiado</span>
                     </>
                   ) : (
                     <>
-                      <Copy className="w-3.5 h-3.5 text-[#E5A93C]" />
+                      <Copy className="w-3.5 h-3.5 text-amber-600 dark:text-[#E5A93C]" />
                       <span>Copiar dossier 30s</span>
                     </>
                   )}
@@ -747,18 +808,18 @@ export function TrailerView({
               </div>
 
               {/* Real Gemini TTS Voice-Over & Lyria 30s Score */}
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-3 border-t border-white/10">
-                <div className="p-3.5 rounded-xl border border-white/10 bg-[#14141B] space-y-2.5">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-3 border-t border-[#E2DDD3] dark:border-white/10">
+                <div className="p-3.5 rounded-xl border border-[#DCD6CA] dark:border-white/10 bg-[#FAF8F4] dark:bg-[#14141B] space-y-2.5">
                   <div className="flex items-center justify-between gap-2">
-                    <div className="flex items-center gap-1.5 text-xs font-semibold text-[#F2F0EB]">
-                      <Mic className="w-3.5 h-3.5 text-[#E5A93C]" />
+                    <div className="flex items-center gap-1.5 text-xs font-semibold text-[#18181B] dark:text-[#F2F0EB]">
+                      <Mic className="w-3.5 h-3.5 text-amber-600 dark:text-[#E5A93C]" />
                       <span>Voz en Off Realista ({trailer.voicePreset})</span>
                     </div>
                     <button
                       type="button"
                       onClick={handleGenerateTrailerVoiceOver}
                       disabled={generatingVoiceOver}
-                      className="px-2.5 py-1.5 rounded-md border border-[#E5A93C]/45 bg-[#1B1812] hover:bg-[#272116] disabled:opacity-60 text-[11px] font-medium text-[#E5A93C] whitespace-nowrap"
+                      className="px-2.5 py-1.5 rounded-md border border-amber-500/45 dark:border-[#E5A93C]/45 bg-amber-50 dark:bg-[#1B1812] hover:bg-amber-100 dark:hover:bg-[#272116] disabled:opacity-60 text-[11px] font-medium text-amber-800 dark:text-[#E5A93C] whitespace-nowrap"
                     >
                       {generatingVoiceOver
                         ? 'Sintetizando WAV...'
@@ -767,7 +828,7 @@ export function TrailerView({
                           : 'Generar Voz en Off (WAV)'}
                     </button>
                   </div>
-                  <p className="text-xs text-[#CFCAC0] leading-relaxed italic">
+                  <p className="text-xs text-[#3F3F46] dark:text-[#CFCAC0] leading-relaxed italic">
                     &ldquo;{trailer.voiceOverScript}&rdquo;
                   </p>
                   {trailer.voiceOverAudioUrl && (
@@ -780,17 +841,17 @@ export function TrailerView({
                   )}
                 </div>
 
-                <div className="p-3.5 rounded-xl border border-white/10 bg-[#14141B] space-y-2.5">
+                <div className="p-3.5 rounded-xl border border-[#DCD6CA] dark:border-white/10 bg-[#FAF8F4] dark:bg-[#14141B] space-y-2.5">
                   <div className="flex items-center justify-between gap-2">
-                    <div className="flex items-center gap-1.5 text-xs font-semibold text-[#F2F0EB]">
-                      <Music className="w-3.5 h-3.5 text-[#38B2AC]" />
+                    <div className="flex items-center gap-1.5 text-xs font-semibold text-[#18181B] dark:text-[#F2F0EB]">
+                      <Music className="w-3.5 h-3.5 text-teal-600 dark:text-[#38B2AC]" />
                       <span>Partitura 30s (Lyria) · {trailer.tempoBpm} BPM</span>
                     </div>
                     <button
                       type="button"
                       onClick={handleGenerateTrailerMusic}
                       disabled={generatingMusic}
-                      className="px-2.5 py-1.5 rounded-md border border-[#38B2AC]/45 bg-[#102625] hover:bg-[#163433] disabled:opacity-60 text-[11px] font-medium text-[#5EEAD4] whitespace-nowrap"
+                      className="px-2.5 py-1.5 rounded-md border border-teal-600/45 dark:border-[#38B2AC]/45 bg-teal-50 dark:bg-[#102625] hover:bg-teal-100 dark:hover:bg-[#163433] disabled:opacity-60 text-[11px] font-medium text-teal-800 dark:text-[#5EEAD4] whitespace-nowrap"
                     >
                       {generatingMusic
                         ? 'Componiendo MP3...'
@@ -799,7 +860,7 @@ export function TrailerView({
                           : 'Generar Música 30s (Lyria)'}
                     </button>
                   </div>
-                  <p className="text-xs text-[#A7A299] leading-relaxed">
+                  <p className="text-xs text-[#52525B] dark:text-[#A7A299] leading-relaxed">
                     {trailer.musicPrompt}
                   </p>
                   {trailer.musicAudioUrl && (
@@ -818,10 +879,10 @@ export function TrailerView({
           {/* 6-Beat Breakdown Cards */}
           <section aria-labelledby="trailer-beats-heading" className="space-y-4">
             <div className="flex items-center justify-between gap-3">
-              <h3 id="trailer-beats-heading" className="font-display text-sm font-semibold text-[#E5A93C]">
+              <h3 id="trailer-beats-heading" className="font-display text-sm font-semibold text-amber-700 dark:text-[#E5A93C]">
                 Desglose de Montaje Plano a Plano (00:00 – 00:30)
               </h3>
-              <span className="text-xs font-mono-tech text-[#8D8981] tabular-nums">
+              <span className="text-xs font-mono-tech text-[#57534E] dark:text-[#8D8981] tabular-nums">
                 {trailer.beats.length} cortes · {trailer.targetResolution}
               </span>
             </div>
@@ -834,11 +895,11 @@ export function TrailerView({
                 return (
                   <article
                     key={beat.id}
-                    className={`rounded-xl border bg-[#131318] overflow-hidden flex flex-col justify-between transition-colors ${
-                      isActive ? 'border-[#E5A93C]' : 'border-white/10'
+                    className={`rounded-xl border bg-[#FFFFFF] dark:bg-[#131318] overflow-hidden flex flex-col justify-between transition-colors shadow-xs dark:shadow-none ${
+                      isActive ? 'border-amber-600 dark:border-[#E5A93C]' : 'border-[#DCD6CA] dark:border-white/10'
                     }`}
                   >
-                    <div className="aspect-video bg-[#08080B] border-b border-white/10 relative overflow-hidden">
+                    <div className="aspect-video bg-[#08080B] border-b border-[#DCD6CA] dark:border-white/10 relative overflow-hidden">
                       {beat.videoUrl ? (
                         <video
                           src={beat.videoUrl}
@@ -870,51 +931,51 @@ export function TrailerView({
                           <button
                             type="button"
                             onClick={() => setCurrentTimeSec(beat.startSec)}
-                            className="text-[#E5A93C] hover:underline font-semibold"
+                            className="text-amber-700 dark:text-[#E5A93C] hover:underline font-semibold"
                           >
                             {formatTimecodeSec(beat.startSec)}–{formatTimecodeSec(beat.endSec)} ({beat.durationSec}s)
                           </button>
-                          <span className="text-[#8D8981] truncate">
+                          <span className="text-[#57534E] dark:text-[#8D8981] truncate">
                             {beat.editingTransition}
                           </span>
                         </div>
 
-                        <div className="text-xs font-semibold text-[#F2F0EB] truncate">
+                        <div className="text-xs font-semibold text-[#18181B] dark:text-[#F2F0EB] truncate">
                           {beat.sourceSequenceTitle}
                         </div>
 
                         {beat.voiceOverLine && (
-                          <p className="text-xs text-[#CFCAC0] italic">
+                          <p className="text-xs text-[#3F3F46] dark:text-[#CFCAC0] italic">
                             &ldquo;{beat.voiceOverLine}&rdquo;
                           </p>
                         )}
 
-                        <p className="text-[11px] text-[#8D8981] line-clamp-2">
+                        <p className="text-[11px] text-[#57534E] dark:text-[#8D8981] line-clamp-2">
                           {beat.visualDescription}
                         </p>
 
-                        <div className="text-[10px] font-mono-tech text-[#5EEAD4]">
+                        <div className="text-[10px] font-mono-tech text-teal-700 dark:text-[#5EEAD4]">
                           SFX: {beat.sfxCue}
                         </div>
                       </div>
 
-                      <div className="pt-2 border-t border-white/5 flex gap-2">
+                      <div className="pt-2 border-t border-[#EBE7DF] dark:border-white/5 flex gap-2">
                         <button
                           type="button"
                           onClick={() => handleGenerateBeatImage(beat)}
                           disabled={busyImg || busyVid}
-                          className="flex-1 inline-flex items-center justify-center gap-1 px-2.5 py-1.5 rounded-md border border-[#E5A93C]/40 bg-[#1B1812] hover:bg-[#272116] disabled:opacity-60 text-[11px] font-medium text-[#F2F0EB]"
+                          className="flex-1 inline-flex items-center justify-center gap-1 px-2.5 py-1.5 rounded-md border border-amber-500/45 dark:border-[#E5A93C]/40 bg-amber-50 dark:bg-[#1B1812] hover:bg-amber-100 dark:hover:bg-[#272116] disabled:opacity-60 text-[11px] font-medium text-[#18181B] dark:text-[#F2F0EB]"
                         >
-                          <ImagePlus className="w-3 h-3 text-[#E5A93C]" />
+                          <ImagePlus className="w-3 h-3 text-amber-600 dark:text-[#E5A93C]" />
                           <span>{busyImg ? 'Nano...' : `Imagen ${trailer.targetResolution}`}</span>
                         </button>
                         <button
                           type="button"
                           onClick={() => handleGenerateBeatVideo(beat)}
                           disabled={busyImg || busyVid}
-                          className="flex-1 inline-flex items-center justify-center gap-1 px-2.5 py-1.5 rounded-md border border-white/15 bg-[#181822] hover:bg-[#222230] disabled:opacity-60 text-[11px] font-medium text-[#F2F0EB]"
+                          className="flex-1 inline-flex items-center justify-center gap-1 px-2.5 py-1.5 rounded-md border border-[#D6D1C7] dark:border-white/15 bg-[#FAF8F4] dark:bg-[#181822] hover:bg-[#EFECE4] dark:hover:bg-[#222230] disabled:opacity-60 text-[11px] font-medium text-[#18181B] dark:text-[#F2F0EB]"
                         >
-                          <Video className="w-3 h-3 text-[#38B2AC]" />
+                          <Video className="w-3 h-3 text-teal-600 dark:text-[#38B2AC]" />
                           <span>{busyVid ? 'Omni...' : 'Clip Omni'}</span>
                         </button>
                       </div>

@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import {
+  Bot,
   Camera,
   Check,
   Copy,
@@ -21,6 +22,7 @@ interface VisionViewProps {
   intelligence: StudioIntelligenceReport;
   onRateSequence: (rating: number, note: string) => Promise<void>;
   onApplyEnhancement: (snippet: string) => Promise<void>;
+  onOpenExternalGuide?: () => void;
 }
 
 const CATEGORY_META: Record<
@@ -38,6 +40,7 @@ export function VisionView({
   intelligence,
   onRateSequence,
   onApplyEnhancement,
+  onOpenExternalGuide,
 }: VisionViewProps) {
   const [copiedHex, setCopiedHex] = useState<string | null>(null);
   const [copiedMaster, setCopiedMaster] = useState(false);
@@ -127,18 +130,18 @@ export function VisionView({
     <div className="space-y-8 max-w-5xl">
       {/* Logline & Director Vision */}
       <section aria-labelledby="vision-heading" className="space-y-4">
-        <div className="flex flex-wrap items-center gap-2 text-xs text-[#9A968E] font-mono-tech tabular-nums">
+        <div className="flex flex-wrap items-center gap-2 text-xs text-[#57534E] dark:text-[#9A968E] font-mono-tech tabular-nums">
           <span>{sequence.directorStyle}</span>
           <span aria-hidden="true">·</span>
           <span>Formato {sequence.aspectRatio}</span>
           <span aria-hidden="true">·</span>
-          <span className="text-[#E5A93C]">
+          <span className="text-amber-700 dark:text-[#E5A93C] font-medium">
             Ultra Def. {sequence.targetResolution || '4K'}
           </span>
           {typeof sequence.chapterIndex === 'number' && (
             <>
               <span aria-hidden="true">·</span>
-              <span className="text-[#5EEAD4]">
+              <span className="text-teal-700 dark:text-[#5EEAD4] font-medium">
                 Capítulo {sequence.chapterIndex}
                 {sequence.chapterTotal ? `/${sequence.chapterTotal}` : ''}
               </span>
@@ -154,25 +157,25 @@ export function VisionView({
 
         <h2
           id="vision-heading"
-          className="font-display text-2xl sm:text-3xl font-semibold text-[#F2F0EB] leading-tight text-balance max-w-3xl"
+          className="font-display text-2xl sm:text-3xl font-semibold text-[#18181B] dark:text-[#F2F0EB] leading-tight text-balance max-w-3xl"
         >
           {sequence.logline}
         </h2>
 
-        <p className="text-[15px] text-[#CFCAC0] leading-relaxed max-w-[70ch]">
+        <p className="text-[15px] text-[#3F3F46] dark:text-[#CFCAC0] leading-relaxed max-w-[70ch]">
           {sequence.directorVision}
         </p>
 
         {sequence.hyperRealisticPrompt && (
-          <div className="p-4 rounded-xl border border-[#E5A93C]/30 bg-[#141310] space-y-2">
+          <div className="p-4 rounded-xl border border-[#E5A93C]/45 dark:border-[#E5A93C]/30 bg-amber-50/70 dark:bg-[#141310] space-y-2">
             <div className="flex items-center justify-between gap-2">
-              <span className="text-xs font-semibold text-[#E5A93C] font-mono-tech">
+              <span className="text-xs font-semibold text-amber-800 dark:text-[#E5A93C] font-mono-tech">
                 Prompt Maestro Hiperrealista ({sequence.targetResolution || '4K'})
               </span>
               <button
                 type="button"
                 onClick={handleCopyMasterPrompt}
-                className="inline-flex items-center gap-1 text-[11px] font-medium text-[#E5A93C] hover:text-[#F4C46A]"
+                className="inline-flex items-center gap-1 text-[11px] font-medium text-amber-700 hover:text-amber-900 dark:text-[#E5A93C] dark:hover:text-[#F4C46A]"
               >
                 {copiedMaster ? (
                   <>
@@ -187,37 +190,60 @@ export function VisionView({
                 )}
               </button>
             </div>
-            <p className="font-mono-tech text-xs text-[#E6E2DA] leading-relaxed">
+            <p className="font-mono-tech text-xs text-[#27272A] dark:text-[#E6E2DA] leading-relaxed">
               {sequence.hyperRealisticPrompt}
             </p>
+          </div>
+        )}
+
+        {onOpenExternalGuide && (
+          <div className="p-4 rounded-xl border border-teal-600/35 dark:border-[#38B2AC]/35 bg-teal-50/70 dark:bg-[#0F1E1E] flex flex-wrap items-center justify-between gap-3">
+            <div className="space-y-0.5 max-w-2xl">
+              <div className="flex items-center gap-2 text-xs font-semibold text-teal-800 dark:text-[#5EEAD4]">
+                <Bot className="w-4 h-4 shrink-0" />
+                <span>Entrega de Agente Arthur · Documento Paso a Paso para Plataforma Externa</span>
+              </div>
+              <p className="text-xs text-[#3F3F46] dark:text-[#CFCAC0]">
+                Accede a todas las indicaciones detalladas (prompts por fotograma, prompts de video,
+                voces en off, música y escaleta de montaje) listas para copiar o descargar en MD, TXT y PDF.
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={onOpenExternalGuide}
+              className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg bg-[#E5A93C] hover:bg-[#EDA949] text-[#0B0B0E] text-xs font-semibold whitespace-nowrap shrink-0"
+            >
+              <Bot className="w-3.5 h-3.5" />
+              <span>Abrir Guía Paso a Paso</span>
+            </button>
           </div>
         )}
       </section>
 
       {/* Camera & Optical Package */}
-      <section aria-labelledby="optics-heading" className="pt-6 border-t border-white/10">
-        <h3 id="optics-heading" className="font-display text-sm font-semibold text-[#E5A93C] mb-4">
+      <section aria-labelledby="optics-heading" className="pt-6 border-t border-[#E2DDD3] dark:border-white/10">
+        <h3 id="optics-heading" className="font-display text-sm font-semibold text-amber-700 dark:text-[#E5A93C] mb-4">
           01. Paquete Óptico y Cámara
         </h3>
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-          <div className="p-4 rounded-xl border border-white/10 bg-[#131318]">
-            <div className="text-xs text-[#8D8981] mb-1">Sistema de Cámara</div>
-            <div className="text-sm font-semibold text-[#F2F0EB]">{sequence.cameraSystem}</div>
+          <div className="p-4 rounded-xl border border-[#DCD6CA] dark:border-white/10 bg-[#FFFFFF] dark:bg-[#131318]">
+            <div className="text-xs text-[#57534E] dark:text-[#8D8981] mb-1">Sistema de Cámara</div>
+            <div className="text-sm font-semibold text-[#18181B] dark:text-[#F2F0EB]">{sequence.cameraSystem}</div>
           </div>
-          <div className="p-4 rounded-xl border border-white/10 bg-[#131318]">
-            <div className="text-xs text-[#8D8981] mb-1">Juego de Lentes</div>
-            <div className="text-sm font-semibold text-[#F2F0EB]">{sequence.lensPackage}</div>
+          <div className="p-4 rounded-xl border border-[#DCD6CA] dark:border-white/10 bg-[#FFFFFF] dark:bg-[#131318]">
+            <div className="text-xs text-[#57534E] dark:text-[#8D8981] mb-1">Juego de Lentes</div>
+            <div className="text-sm font-semibold text-[#18181B] dark:text-[#F2F0EB]">{sequence.lensPackage}</div>
           </div>
-          <div className="p-4 rounded-xl border border-white/10 bg-[#131318]">
-            <div className="text-xs text-[#8D8981] mb-1">Emulsión / LUT Maestro</div>
-            <div className="text-sm font-semibold text-[#F2F0EB]">{sequence.filmStockOrLut}</div>
+          <div className="p-4 rounded-xl border border-[#DCD6CA] dark:border-white/10 bg-[#FFFFFF] dark:bg-[#131318]">
+            <div className="text-xs text-[#57534E] dark:text-[#8D8981] mb-1">Emulsión / LUT Maestro</div>
+            <div className="text-sm font-semibold text-[#18181B] dark:text-[#F2F0EB]">{sequence.filmStockOrLut}</div>
           </div>
         </div>
       </section>
 
       {/* Color Palette */}
-      <section aria-labelledby="palette-heading" className="pt-6 border-t border-white/10">
-        <h3 id="palette-heading" className="font-display text-sm font-semibold text-[#E5A93C] mb-4">
+      <section aria-labelledby="palette-heading" className="pt-6 border-t border-[#E2DDD3] dark:border-white/10">
+        <h3 id="palette-heading" className="font-display text-sm font-semibold text-amber-700 dark:text-[#E5A93C] mb-4">
           02. Paleta de Color y Colorimetría
         </h3>
         <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
@@ -226,23 +252,23 @@ export function VisionView({
               key={`${swatch.name}-${swatch.hex}`}
               type="button"
               onClick={() => handleCopyHex(swatch.hex)}
-              className="group text-left rounded-xl border border-white/10 bg-[#131318] overflow-hidden hover:border-white/25 transition-colors focus-visible:outline-2 focus-visible:outline-[#E5A93C]"
+              className="group text-left rounded-xl border border-[#DCD6CA] dark:border-white/10 bg-[#FFFFFF] dark:bg-[#131318] overflow-hidden hover:border-[#B5AFA4] dark:hover:border-white/25 transition-colors focus-visible:outline-2 focus-visible:outline-[#E5A93C]"
             >
               <div
-                className="h-16 w-full border-b border-white/10"
+                className="h-16 w-full border-b border-[#E2DDD3] dark:border-white/10"
                 style={{ backgroundColor: swatch.hex }}
               />
               <div className="p-3">
-                <div className="text-xs font-semibold text-[#F2F0EB] truncate">{swatch.name}</div>
-                <div className="mt-1 flex items-center justify-between text-[11px] font-mono-tech text-[#8D8981]">
+                <div className="text-xs font-semibold text-[#18181B] dark:text-[#F2F0EB] truncate">{swatch.name}</div>
+                <div className="mt-1 flex items-center justify-between text-[11px] font-mono-tech text-[#57534E] dark:text-[#8D8981]">
                   <span>{swatch.hex}</span>
                   {copiedHex === swatch.hex ? (
-                    <Check className="w-3 h-3 text-[#22C55E]" />
+                    <Check className="w-3 h-3 text-emerald-600 dark:text-[#22C55E]" />
                   ) : (
                     <Copy className="w-3 h-3 opacity-0 group-hover:opacity-100 transition-opacity" />
                   )}
                 </div>
-                <div className="mt-1 text-[11px] text-[#7D7971] line-clamp-1">{swatch.role}</div>
+                <div className="mt-1 text-[11px] text-[#57534E] dark:text-[#7D7971] line-clamp-1">{swatch.role}</div>
               </div>
             </button>
           ))}
@@ -250,61 +276,61 @@ export function VisionView({
       </section>
 
       {/* Lighting Plot */}
-      <section aria-labelledby="lighting-heading" className="pt-6 border-t border-white/10">
-        <h3 id="lighting-heading" className="font-display text-sm font-semibold text-[#E5A93C] mb-4">
+      <section aria-labelledby="lighting-heading" className="pt-6 border-t border-[#E2DDD3] dark:border-white/10">
+        <h3 id="lighting-heading" className="font-display text-sm font-semibold text-amber-700 dark:text-[#E5A93C] mb-4">
           03. Esquema de Iluminación y Atmósfera
         </h3>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <div className="p-4 rounded-xl border border-white/10 bg-[#131318] space-y-3">
+          <div className="p-4 rounded-xl border border-[#DCD6CA] dark:border-white/10 bg-[#FFFFFF] dark:bg-[#131318] space-y-3">
             <div>
-              <div className="text-xs text-[#8D8981]">Luz Principal (Key Light)</div>
-              <div className="text-sm text-[#EAE6DE] mt-0.5">{lighting.keyLight}</div>
+              <div className="text-xs text-[#57534E] dark:text-[#8D8981]">Luz Principal (Key Light)</div>
+              <div className="text-sm text-[#18181B] dark:text-[#EAE6DE] mt-0.5">{lighting.keyLight}</div>
             </div>
-            <div className="pt-3 border-t border-white/5">
-              <div className="text-xs text-[#8D8981]">Ratio de Contraste / Relleno</div>
-              <div className="text-sm text-[#EAE6DE] mt-0.5">{lighting.fillRatio}</div>
+            <div className="pt-3 border-t border-[#EBE7DF] dark:border-white/5">
+              <div className="text-xs text-[#57534E] dark:text-[#8D8981]">Ratio de Contraste / Relleno</div>
+              <div className="text-sm text-[#18181B] dark:text-[#EAE6DE] mt-0.5">{lighting.fillRatio}</div>
             </div>
-            <div className="pt-3 border-t border-white/5">
-              <div className="text-xs text-[#8D8981]">Contraluz y Perfilado (Rim)</div>
-              <div className="text-sm text-[#EAE6DE] mt-0.5">{lighting.rimAndBacklight}</div>
+            <div className="pt-3 border-t border-[#EBE7DF] dark:border-white/5">
+              <div className="text-xs text-[#57534E] dark:text-[#8D8981]">Contraluz y Perfilado (Rim)</div>
+              <div className="text-sm text-[#18181B] dark:text-[#EAE6DE] mt-0.5">{lighting.rimAndBacklight}</div>
             </div>
           </div>
 
-          <div className="p-4 rounded-xl border border-white/10 bg-[#131318] space-y-3">
+          <div className="p-4 rounded-xl border border-[#DCD6CA] dark:border-white/10 bg-[#FFFFFF] dark:bg-[#131318] space-y-3">
             <div>
-              <div className="text-xs text-[#8D8981]">Temperaturas de Color (Kelvin)</div>
-              <div className="text-sm font-mono-tech text-[#EAE6DE] mt-0.5">
+              <div className="text-xs text-[#57534E] dark:text-[#8D8981]">Temperaturas de Color (Kelvin)</div>
+              <div className="text-sm font-mono-tech text-[#18181B] dark:text-[#EAE6DE] mt-0.5">
                 {lighting.colorTemperatureKelvin}
               </div>
             </div>
-            <div className="pt-3 border-t border-white/5">
-              <div className="text-xs text-[#8D8981]">Densidad Atmosférica y Niebla</div>
-              <div className="text-sm text-[#EAE6DE] mt-0.5">{lighting.atmosphereAndHaze}</div>
+            <div className="pt-3 border-t border-[#EBE7DF] dark:border-white/5">
+              <div className="text-xs text-[#57534E] dark:text-[#8D8981]">Densidad Atmosférica y Niebla</div>
+              <div className="text-sm text-[#18181B] dark:text-[#EAE6DE] mt-0.5">{lighting.atmosphereAndHaze}</div>
             </div>
           </div>
         </div>
       </section>
 
       {/* VFX, Practical SFX & Production Design */}
-      <section aria-labelledby="vfx-heading" className="pt-6 border-t border-white/10">
-        <h3 id="vfx-heading" className="font-display text-sm font-semibold text-[#E5A93C] mb-4">
+      <section aria-labelledby="vfx-heading" className="pt-6 border-t border-[#E2DDD3] dark:border-white/10">
+        <h3 id="vfx-heading" className="font-display text-sm font-semibold text-amber-700 dark:text-[#E5A93C] mb-4">
           04. Diseño de Producción, VFX y Efectos Prácticos
         </h3>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <div className="p-4 rounded-xl border border-white/10 bg-[#131318]">
-            <div className="text-xs font-medium text-[#C8C3BA] mb-2">
+          <div className="p-4 rounded-xl border border-[#DCD6CA] dark:border-white/10 bg-[#FFFFFF] dark:bg-[#131318]">
+            <div className="text-xs font-medium text-[#3F3F46] dark:text-[#C8C3BA] mb-2">
               Efectos Visuales (CGI / Simulación)
             </div>
-            <ul className="space-y-1.5 text-sm text-[#D4CFC7] list-disc pl-4">
+            <ul className="space-y-1.5 text-sm text-[#27272A] dark:text-[#D4CFC7] list-disc pl-4">
               {(vfx.cgiElements || []).map((item, idx) => (
                 <li key={idx}>{item}</li>
               ))}
             </ul>
-            <div className="mt-4 pt-3 border-t border-white/5">
-              <div className="text-xs font-medium text-[#C8C3BA] mb-2">
+            <div className="mt-4 pt-3 border-t border-[#EBE7DF] dark:border-white/5">
+              <div className="text-xs font-medium text-[#3F3F46] dark:text-[#C8C3BA] mb-2">
                 Efectos Prácticos en Set (SFX)
               </div>
-              <ul className="space-y-1.5 text-sm text-[#D4CFC7] list-disc pl-4">
+              <ul className="space-y-1.5 text-sm text-[#27272A] dark:text-[#D4CFC7] list-disc pl-4">
                 {(vfx.practicalSfx || []).map((item, idx) => (
                   <li key={idx}>{item}</li>
                 ))}
@@ -312,20 +338,20 @@ export function VisionView({
             </div>
           </div>
 
-          <div className="p-4 rounded-xl border border-white/10 bg-[#131318] space-y-4">
+          <div className="p-4 rounded-xl border border-[#DCD6CA] dark:border-white/10 bg-[#FFFFFF] dark:bg-[#131318] space-y-4">
             <div>
-              <div className="text-xs font-medium text-[#C8C3BA] mb-1">
+              <div className="text-xs font-medium text-[#3F3F46] dark:text-[#C8C3BA] mb-1">
                 Locaciones y Construcción de Set
               </div>
-              <p className="text-sm text-[#D4CFC7] leading-relaxed">
+              <p className="text-sm text-[#27272A] dark:text-[#D4CFC7] leading-relaxed">
                 {vfx.locationsAndSets}
               </p>
             </div>
-            <div className="pt-3 border-t border-white/5">
-              <div className="text-xs font-medium text-[#C8C3BA] mb-1">
+            <div className="pt-3 border-t border-[#EBE7DF] dark:border-white/5">
+              <div className="text-xs font-medium text-[#3F3F46] dark:text-[#C8C3BA] mb-1">
                 Vestuario, Texturas y Caracterización
               </div>
-              <p className="text-sm text-[#D4CFC7] leading-relaxed">
+              <p className="text-sm text-[#27272A] dark:text-[#D4CFC7] leading-relaxed">
                 {vfx.wardrobeAndMakeup}
               </p>
             </div>
@@ -336,19 +362,19 @@ export function VisionView({
       {/* Studio Intelligence & Suggested Directorial Enhancements */}
       <section
         aria-labelledby="studio-intelligence-heading"
-        className="pt-6 border-t border-white/10 space-y-5"
+        className="pt-6 border-t border-[#E2DDD3] dark:border-white/10 space-y-5"
       >
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div className="flex items-center gap-2">
-            <Lightbulb className="w-4 h-4 text-[#E5A93C]" />
+            <Lightbulb className="w-4 h-4 text-amber-600 dark:text-[#E5A93C]" />
             <h3
               id="studio-intelligence-heading"
-              className="font-display text-sm font-semibold text-[#E5A93C]"
+              className="font-display text-sm font-semibold text-amber-700 dark:text-[#E5A93C]"
             >
               05. Studio Intelligence — Mejoras de Dirección Sugeridas
             </h3>
           </div>
-          <div className="text-xs font-mono-tech text-[#8D8981] tabular-nums">
+          <div className="text-xs font-mono-tech text-[#57534E] dark:text-[#8D8981] tabular-nums">
             {intelligence.totalTrackedOutcomes} resultados exitosos registrados ·{' '}
             {intelligence.finalizedSequencesCount} versiones finales
           </div>
@@ -356,63 +382,63 @@ export function VisionView({
 
         {/* Cross-project Pattern Benchmarks */}
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-          <div className="p-4 rounded-xl border border-white/10 bg-[#111116] space-y-2">
-            <div className="text-xs font-medium text-[#C8C3BA] flex items-center gap-1.5">
-              <Camera className="w-3.5 h-3.5 text-[#E5A93C]" />
+          <div className="p-4 rounded-xl border border-[#DCD6CA] dark:border-white/10 bg-[#FAF8F4] dark:bg-[#111116] space-y-2">
+            <div className="text-xs font-medium text-[#3F3F46] dark:text-[#C8C3BA] flex items-center gap-1.5">
+              <Camera className="w-3.5 h-3.5 text-amber-600 dark:text-[#E5A93C]" />
               <span>Cámara de Mayor Rendimiento</span>
             </div>
             {intelligence.topCameraPatterns[0] ? (
               <>
-                <div className="text-xs font-semibold text-[#F2F0EB]">
+                <div className="text-xs font-semibold text-[#18181B] dark:text-[#F2F0EB]">
                   {intelligence.topCameraPatterns[0].label}
                 </div>
-                <div className="text-[11px] font-mono-tech text-[#8D8981] tabular-nums">
+                <div className="text-[11px] font-mono-tech text-[#57534E] dark:text-[#8D8981] tabular-nums">
                   {intelligence.topCameraPatterns[0].avgRating}/5 ★ ·{' '}
                   {intelligence.topCameraPatterns[0].occurrences} reg.
                 </div>
               </>
             ) : (
-              <div className="text-xs text-[#7D7971]">Sin métricas suficientes aún</div>
+              <div className="text-xs text-[#57534E] dark:text-[#7D7971]">Sin métricas suficientes aún</div>
             )}
           </div>
 
-          <div className="p-4 rounded-xl border border-white/10 bg-[#111116] space-y-2">
-            <div className="text-xs font-medium text-[#C8C3BA] flex items-center gap-1.5">
-              <Sun className="w-3.5 h-3.5 text-[#E5A93C]" />
+          <div className="p-4 rounded-xl border border-[#DCD6CA] dark:border-white/10 bg-[#FAF8F4] dark:bg-[#111116] space-y-2">
+            <div className="text-xs font-medium text-[#3F3F46] dark:text-[#C8C3BA] flex items-center gap-1.5">
+              <Sun className="w-3.5 h-3.5 text-amber-600 dark:text-[#E5A93C]" />
               <span>Iluminación Probada</span>
             </div>
             {intelligence.topLightingSetups[0] ? (
               <>
-                <div className="text-xs font-semibold text-[#F2F0EB]">
+                <div className="text-xs font-semibold text-[#18181B] dark:text-[#F2F0EB]">
                   {intelligence.topLightingSetups[0].label}
                 </div>
-                <div className="text-[11px] font-mono-tech text-[#8D8981] tabular-nums">
+                <div className="text-[11px] font-mono-tech text-[#57534E] dark:text-[#8D8981] tabular-nums">
                   {intelligence.topLightingSetups[0].avgRating}/5 ★ ·{' '}
                   {intelligence.topLightingSetups[0].occurrences} reg.
                 </div>
               </>
             ) : (
-              <div className="text-xs text-[#7D7971]">Sin métricas suficientes aún</div>
+              <div className="text-xs text-[#57534E] dark:text-[#7D7971]">Sin métricas suficientes aún</div>
             )}
           </div>
 
-          <div className="p-4 rounded-xl border border-white/10 bg-[#111116] space-y-2">
-            <div className="text-xs font-medium text-[#C8C3BA] flex items-center gap-1.5">
-              <Volume2 className="w-3.5 h-3.5 text-[#E5A93C]" />
+          <div className="p-4 rounded-xl border border-[#DCD6CA] dark:border-white/10 bg-[#FAF8F4] dark:bg-[#111116] space-y-2">
+            <div className="text-xs font-medium text-[#3F3F46] dark:text-[#C8C3BA] flex items-center gap-1.5">
+              <Volume2 className="w-3.5 h-3.5 text-amber-600 dark:text-[#E5A93C]" />
               <span>Paisaje Sonoro Destacado</span>
             </div>
             {intelligence.topSoundscapes[0] ? (
               <>
-                <div className="text-xs font-semibold text-[#F2F0EB]">
+                <div className="text-xs font-semibold text-[#18181B] dark:text-[#F2F0EB]">
                   {intelligence.topSoundscapes[0].label}
                 </div>
-                <div className="text-[11px] font-mono-tech text-[#8D8981] tabular-nums">
+                <div className="text-[11px] font-mono-tech text-[#57534E] dark:text-[#8D8981] tabular-nums">
                   {intelligence.topSoundscapes[0].avgRating}/5 ★ ·{' '}
                   {intelligence.topSoundscapes[0].occurrences} reg.
                 </div>
               </>
             ) : (
-              <div className="text-xs text-[#7D7971]">Sin métricas suficientes aún</div>
+              <div className="text-xs text-[#57534E] dark:text-[#7D7971]">Sin métricas suficientes aún</div>
             )}
           </div>
         </div>
@@ -428,25 +454,25 @@ export function VisionView({
             return (
               <article
                 key={enh.id}
-                className="p-4 rounded-xl border border-white/10 bg-[#131318] flex flex-col justify-between gap-3"
+                className="p-4 rounded-xl border border-[#DCD6CA] dark:border-white/10 bg-[#FFFFFF] dark:bg-[#131318] flex flex-col justify-between gap-3"
               >
                 <div className="space-y-2">
                   <div className="flex items-center justify-between gap-2 text-[11px] font-mono-tech">
-                    <span className="inline-flex items-center gap-1.5 text-[#E5A93C] font-medium">
+                    <span className="inline-flex items-center gap-1.5 text-amber-700 dark:text-[#E5A93C] font-medium">
                       <Icon className="w-3.5 h-3.5" />
                       <span>{meta.label}</span>
                     </span>
-                    <span className="text-[#8D8981] tabular-nums">
+                    <span className="text-[#57534E] dark:text-[#8D8981] tabular-nums">
                       {enh.confidenceScore}% afín
                     </span>
                   </div>
-                  <h4 className="text-sm font-semibold text-[#F2F0EB] leading-snug">
+                  <h4 className="text-sm font-semibold text-[#18181B] dark:text-[#F2F0EB] leading-snug">
                     {enh.title}
                   </h4>
-                  <p className="text-xs text-[#D4CFC7] leading-relaxed">
+                  <p className="text-xs text-[#27272A] dark:text-[#D4CFC7] leading-relaxed">
                     {enh.recommendation}
                   </p>
-                  <p className="text-[11px] text-[#8D8981] leading-relaxed">
+                  <p className="text-[11px] text-[#57534E] dark:text-[#8D8981] leading-relaxed">
                     {enh.rationale}
                   </p>
                 </div>
@@ -457,8 +483,8 @@ export function VisionView({
                   disabled={alreadyApplied || isApplying}
                   className={`w-full inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg border text-xs font-medium transition-colors ${
                     alreadyApplied
-                      ? 'border-[#38B2AC]/35 bg-[#102625] text-[#5EEAD4]'
-                      : 'border-white/12 bg-[#1A1A22] hover:bg-[#23232E] text-[#F2F0EB]'
+                      ? 'border-teal-600/35 dark:border-[#38B2AC]/35 bg-teal-50 dark:bg-[#102625] text-teal-800 dark:text-[#5EEAD4]'
+                      : 'border-[#D6D1C7] dark:border-white/12 bg-[#FAF8F4] hover:bg-[#EFECE5] dark:bg-[#1A1A22] dark:hover:bg-[#23232E] text-[#18181B] dark:text-[#F2F0EB]'
                   }`}
                 >
                   {alreadyApplied ? (
@@ -468,7 +494,7 @@ export function VisionView({
                     </>
                   ) : (
                     <>
-                      <Sparkles className="w-3.5 h-3.5 text-[#E5A93C]" />
+                      <Sparkles className="w-3.5 h-3.5 text-amber-600 dark:text-[#E5A93C]" />
                       <span>{isApplying ? 'Aplicando...' : 'Aplicar a Biblia'}</span>
                     </>
                   )}
@@ -481,11 +507,11 @@ export function VisionView({
         {/* Rate Current Sequence Choices to Feed Studio Intelligence */}
         <form
           onSubmit={handleSubmitRating}
-          className="p-4 rounded-xl border border-white/10 bg-[#0F0F14] flex flex-col lg:flex-row lg:items-end justify-between gap-3"
+          className="p-4 rounded-xl border border-[#DCD6CA] dark:border-white/10 bg-[#FAF8F4] dark:bg-[#0F0F14] flex flex-col lg:flex-row lg:items-end justify-between gap-3"
         >
           <div className="space-y-1.5 flex-1">
-            <div className="text-xs font-semibold text-[#F2F0EB] flex items-center gap-1.5">
-              <Star className="w-3.5 h-3.5 text-[#E5A93C]" />
+            <div className="text-xs font-semibold text-[#18181B] dark:text-[#F2F0EB] flex items-center gap-1.5">
+              <Star className="w-3.5 h-3.5 text-amber-600 dark:text-[#E5A93C]" />
               <span>Evaluar elecciones de esta secuencia para alimentar Studio Intelligence</span>
             </div>
             <div className="flex flex-wrap items-center gap-2">
@@ -496,7 +522,7 @@ export function VisionView({
                 id="sequence-rating-select"
                 value={selectedRating}
                 onChange={(e) => setSelectedRating(Number(e.target.value))}
-                className="rounded-lg border border-white/12 bg-[#0B0B0E] px-3 py-2 text-xs text-[#F2F0EB] font-mono-tech focus:border-[#E5A93C] focus:outline-none"
+                className="rounded-lg border border-[#D6D1C7] dark:border-white/12 bg-[#FFFFFF] dark:bg-[#0B0B0E] px-3 py-2 text-xs text-[#18181B] dark:text-[#F2F0EB] font-mono-tech focus:border-[#E5A93C] focus:outline-none"
               >
                 <option value={5}>5 ★ — Sobresaliente (referencia)</option>
                 <option value={4}>4 ★ — Muy sólida</option>
@@ -514,14 +540,14 @@ export function VisionView({
                 value={ratingNote}
                 onChange={(e) => setRatingNote(e.target.value)}
                 placeholder="Opcional: qué técnica destacó (ej. dolly lento + LFE 32Hz)..."
-                className="flex-1 min-w-[220px] rounded-lg border border-white/12 bg-[#0B0B0E] px-3 py-2 text-xs text-[#F2F0EB] placeholder:text-[#6E6A63] focus:border-[#E5A93C] focus:outline-none"
+                className="flex-1 min-w-[220px] rounded-lg border border-[#D6D1C7] dark:border-white/12 bg-[#FFFFFF] dark:bg-[#0B0B0E] px-3 py-2 text-xs text-[#18181B] dark:text-[#F2F0EB] placeholder:text-[#78746C] dark:placeholder:text-[#6E6A63] focus:border-[#E5A93C] focus:outline-none"
               />
             </div>
             {ratingSavedMsg && (
-              <p className="text-[11px] text-[#5EEAD4]">{ratingSavedMsg}</p>
+              <p className="text-[11px] text-teal-700 dark:text-[#5EEAD4]">{ratingSavedMsg}</p>
             )}
             {ratingErrorMsg && (
-              <p role="alert" className="text-[11px] text-[#FCA5A5]">
+              <p role="alert" className="text-[11px] text-red-700 dark:text-[#FCA5A5]">
                 {ratingErrorMsg}
               </p>
             )}

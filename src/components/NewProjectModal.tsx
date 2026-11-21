@@ -65,18 +65,18 @@ export function NewProjectModal({ open, onClose, onCreate }: NewProjectModalProp
       role="dialog"
       aria-modal="true"
       aria-labelledby="new-project-heading"
-      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80"
+      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 dark:bg-black/80"
     >
-      <div className="w-full max-w-lg rounded-xl border border-white/15 bg-[#131318] p-6">
+      <div className="w-full max-w-lg rounded-xl border border-[#DCD6CA] dark:border-white/15 bg-[#FFFFFF] dark:bg-[#131318] p-6 shadow-2xl">
         <div className="flex items-center justify-between mb-5">
-          <h2 id="new-project-heading" className="font-display text-lg font-semibold text-[#F2F0EB]">
+          <h2 id="new-project-heading" className="font-display text-lg font-semibold text-[#18181B] dark:text-[#F2F0EB]">
             Nueva Producción Cinematográfica
           </h2>
           <button
             type="button"
             onClick={onClose}
             aria-label="Cerrar ventana"
-            className="p-2 rounded-lg text-[#9A968E] hover:text-[#F2F0EB] hover:bg-white/5"
+            className="p-2 rounded-lg text-[#57534E] dark:text-[#9A968E] hover:text-[#18181B] dark:hover:text-[#F2F0EB] hover:bg-black/5 dark:hover:bg-white/5"
           >
             <X className="w-4 h-4" />
           </button>
@@ -84,7 +84,7 @@ export function NewProjectModal({ open, onClose, onCreate }: NewProjectModalProp
 
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
-            <label htmlFor="new-proj-title" className="block text-xs font-medium text-[#C8C3BA] mb-1.5">
+            <label htmlFor="new-proj-title" className="block text-xs font-medium text-[#3F3F46] dark:text-[#C8C3BA] mb-1.5">
               Título de la obra o película
             </label>
             <input
@@ -93,20 +93,20 @@ export function NewProjectModal({ open, onClose, onCreate }: NewProjectModalProp
               value={title}
               onChange={(e) => setTitle(e.target.value)}
               placeholder="Ej: Crónicas de Marte · Audiolibro El Abismo"
-              className="w-full rounded-lg border border-white/15 bg-[#0B0B0E] px-3 py-2.5 text-sm text-[#F2F0EB] placeholder:text-[#6E6A63] focus:border-[#E5A93C] focus:outline-none"
+              className="w-full rounded-lg border border-[#D6D1C7] dark:border-white/15 bg-[#FFFFFF] dark:bg-[#0B0B0E] px-3 py-2.5 text-sm text-[#18181B] dark:text-[#F2F0EB] placeholder:text-[#78746C] dark:placeholder:text-[#6E6A63] focus:border-[#E5A93C] focus:outline-none"
             />
           </div>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>
-              <label htmlFor="new-proj-source" className="block text-xs font-medium text-[#C8C3BA] mb-1.5">
+              <label htmlFor="new-proj-source" className="block text-xs font-medium text-[#3F3F46] dark:text-[#C8C3BA] mb-1.5">
                 Formato de origen principal
               </label>
               <select
                 id="new-proj-source"
                 value={defaultSourceType}
                 onChange={(e) => setDefaultSourceType(e.target.value as SourceMaterialType)}
-                className="w-full rounded-lg border border-white/15 bg-[#0B0B0E] px-3 py-2.5 text-sm text-[#F2F0EB] focus:border-[#E5A93C] focus:outline-none"
+                className="w-full rounded-lg border border-[#D6D1C7] dark:border-white/15 bg-[#FFFFFF] dark:bg-[#0B0B0E] px-3 py-2.5 text-sm text-[#18181B] dark:text-[#F2F0EB] focus:border-[#E5A93C] focus:outline-none"
               >
                 <option value="book">Libro / Manuscrito</option>
                 <option value="audiobook">Audiolibro (Audio)</option>
@@ -115,14 +115,14 @@ export function NewProjectModal({ open, onClose, onCreate }: NewProjectModalProp
             </div>
 
             <div>
-              <label htmlFor="new-proj-style" className="block text-xs font-medium text-[#C8C3BA] mb-1.5">
+              <label htmlFor="new-proj-style" className="block text-xs font-medium text-[#3F3F46] dark:text-[#C8C3BA] mb-1.5">
                 Estilo de dirección base
               </label>
               <select
                 id="new-proj-style"
                 value={genreStyle}
                 onChange={(e) => setGenreStyle(e.target.value)}
-                className="w-full rounded-lg border border-white/15 bg-[#0B0B0E] px-3 py-2.5 text-sm text-[#F2F0EB] focus:border-[#E5A93C] focus:outline-none"
+                className="w-full rounded-lg border border-[#D6D1C7] dark:border-white/15 bg-[#FFFFFF] dark:bg-[#0B0B0E] px-3 py-2.5 text-sm text-[#18181B] dark:text-[#F2F0EB] focus:border-[#E5A93C] focus:outline-none"
               >
                 {DIRECTOR_STYLES.map((style) => (
                   <option key={style.id} value={style.label}>
@@ -134,7 +134,7 @@ export function NewProjectModal({ open, onClose, onCreate }: NewProjectModalProp
           </div>
 
           <div>
-            <label htmlFor="new-proj-bible" className="block text-xs font-medium text-[#C8C3BA] mb-1.5">
+            <label htmlFor="new-proj-bible" className="block text-xs font-medium text-[#3F3F46] dark:text-[#C8C3BA] mb-1.5">
               Biblia de continuidad inicial (opcional)
             </label>
             <textarea
@@ -143,12 +143,12 @@ export function NewProjectModal({ open, onClose, onCreate }: NewProjectModalProp
               value={continuityBible}
               onChange={(e) => setContinuityBible(e.target.value)}
               placeholder="Reglas visuales, época, reparto imaginado, estética de luz o sonido..."
-              className="w-full rounded-lg border border-white/15 bg-[#0B0B0E] px-3 py-2.5 text-sm text-[#F2F0EB] placeholder:text-[#6E6A63] focus:border-[#E5A93C] focus:outline-none resize-none"
+              className="w-full rounded-lg border border-[#D6D1C7] dark:border-white/15 bg-[#FFFFFF] dark:bg-[#0B0B0E] px-3 py-2.5 text-sm text-[#18181B] dark:text-[#F2F0EB] placeholder:text-[#78746C] dark:placeholder:text-[#6E6A63] focus:border-[#E5A93C] focus:outline-none resize-none"
             />
           </div>
 
           {error && (
-            <p role="alert" className="text-xs text-[#F87171] bg-[#451A1A]/40 border border-[#EF4444]/30 rounded-lg px-3 py-2">
+            <p role="alert" className="text-xs text-red-700 dark:text-[#F87171] bg-red-50 dark:bg-[#451A1A]/40 border border-red-300 dark:border-[#EF4444]/30 rounded-lg px-3 py-2">
               {error}
             </p>
           )}
@@ -157,7 +157,7 @@ export function NewProjectModal({ open, onClose, onCreate }: NewProjectModalProp
             <button
               type="button"
               onClick={onClose}
-              className="px-4 py-2 rounded-lg border border-white/15 text-xs font-medium text-[#C8C3BA] hover:bg-white/5"
+              className="px-4 py-2 rounded-lg border border-[#D6D1C7] dark:border-white/15 text-xs font-medium text-[#3F3F46] dark:text-[#C8C3BA] hover:bg-black/5 dark:hover:bg-white/5"
             >
               Cancelar
             </button>

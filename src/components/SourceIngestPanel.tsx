@@ -445,19 +445,19 @@ export function SourceIngestPanel({
   return (
     <section
       aria-label="Mesa de ingesta y dirección"
-      className="w-full xl:w-[355px] shrink-0 border-b xl:border-b-0 xl:border-r border-white/10 bg-[#0F0F14] p-4 overflow-y-auto"
+      className="w-full xl:w-[355px] shrink-0 border-b xl:border-b-0 xl:border-r border-[#E2DDD3] dark:border-white/10 bg-[#FAF8F4] dark:bg-[#0F0F14] p-4 overflow-y-auto"
     >
       <div className="mb-3 flex items-start justify-between gap-2">
         <div>
-          <h2 className="font-display text-base font-semibold text-[#F2F0EB]">
+          <h2 className="font-display text-base font-semibold text-[#18181B] dark:text-[#F2F0EB]">
             Ingesta y Dirección
           </h2>
-          <p className="text-xs text-[#8D8981] mt-0.5">
+          <p className="text-xs text-[#57534E] dark:text-[#8D8981] mt-0.5">
             Convierte libros, audio o relatos dictados en producción 720p–4K.
           </p>
         </div>
         {(project.assets?.length || 0) > 0 && (
-          <span className="text-[11px] font-mono-tech text-[#8D8981] whitespace-nowrap tabular-nums">
+          <span className="text-[11px] font-mono-tech text-[#57534E] dark:text-[#8D8981] whitespace-nowrap tabular-nums">
             {project.assets?.length} assets
           </span>
         )}
@@ -466,10 +466,10 @@ export function SourceIngestPanel({
       <form onSubmit={handleSubmit} className="space-y-3">
         {/* Source Type Segmented Control */}
         <div>
-          <span className="block text-xs font-medium text-[#C8C3BA] mb-1.5">
+          <span className="block text-xs font-medium text-[#3F3F46] dark:text-[#C8C3BA] mb-1.5">
             Tipo de material fuente
           </span>
-          <div className="grid grid-cols-3 gap-1 p-1 rounded-lg bg-[#09090C] border border-white/10">
+          <div className="grid grid-cols-3 gap-1 p-1 rounded-lg bg-[#EFECE5] dark:bg-[#09090C] border border-[#DCD6CA] dark:border-white/10">
             {SOURCE_TYPES.map((item) => {
               const Icon = item.icon;
               const active = sourceType === item.id;
@@ -480,8 +480,8 @@ export function SourceIngestPanel({
                   onClick={() => setSourceType(item.id)}
                   className={`flex items-center justify-center gap-1.5 px-2 py-2 rounded-md text-xs font-medium transition-colors whitespace-nowrap ${
                     active
-                      ? 'bg-[#1D1D26] text-[#F2F0EB] border border-white/10'
-                      : 'text-[#8D8981] hover:text-[#E6E2DA]'
+                      ? 'bg-[#FFFFFF] dark:bg-[#1D1D26] text-[#18181B] dark:text-[#F2F0EB] border border-[#D4CEC2] dark:border-white/10 shadow-xs dark:shadow-none'
+                      : 'text-[#57534E] dark:text-[#8D8981] hover:text-[#18181B] dark:hover:text-[#E6E2DA]'
                   }`}
                 >
                   <Icon className="w-3.5 h-3.5 shrink-0" />
@@ -490,14 +490,14 @@ export function SourceIngestPanel({
               );
             })}
           </div>
-          <p className="text-[11px] text-[#7D7971] mt-1">{activeSourceMeta.hint}</p>
+          <p className="text-[11px] text-[#57534E] dark:text-[#7D7971] mt-1">{activeSourceMeta.hint}</p>
         </div>
 
         {/* File Upload */}
         <div>
           <label
             htmlFor="source-file-upload"
-            className="block text-xs font-medium text-[#C8C3BA] mb-1.5"
+            className="block text-xs font-medium text-[#3F3F46] dark:text-[#C8C3BA] mb-1.5"
           >
             Archivo adjunto (PDF, TXT o Audio)
           </label>
@@ -518,7 +518,7 @@ export function SourceIngestPanel({
           />
           {selectedFile ? (
             <div className="space-y-2">
-              <div className="flex items-center justify-between gap-2 px-3 py-2 rounded-lg border border-[#E5A93C]/40 bg-[#1A1814] text-xs text-[#F2F0EB]">
+              <div className="flex items-center justify-between gap-2 px-3 py-2 rounded-lg border border-[#E5A93C]/50 bg-amber-50 dark:bg-[#1A1814] text-xs text-[#18181B] dark:text-[#F2F0EB]">
                 <span className="truncate font-mono-tech">{selectedFile.name}</span>
                 <button
                   type="button"
@@ -528,20 +528,20 @@ export function SourceIngestPanel({
                     if (fileInputRef.current) fileInputRef.current.value = '';
                   }}
                   aria-label="Quitar archivo adjunto"
-                  className="p-1 rounded hover:bg-white/10 text-[#C8C3BA]"
+                  className="p-1 rounded hover:bg-black/5 dark:hover:bg-white/10 text-[#3F3F46] dark:text-[#C8C3BA]"
                 >
                   <X className="w-3.5 h-3.5" />
                 </button>
               </div>
 
               {audioPreviewUrl && (
-                <div className="space-y-2 p-2.5 rounded-lg border border-white/10 bg-[#0B0B0E]">
+                <div className="space-y-2 p-2.5 rounded-lg border border-[#DCD6CA] dark:border-white/10 bg-[#FFFFFF] dark:bg-[#0B0B0E]">
                   <audio controls src={audioPreviewUrl} className="w-full h-8" />
                   <button
                     type="button"
                     onClick={handleQuickAudioAnalysis}
                     disabled={analyzingAudio || isProducing}
-                    className="w-full inline-flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-md border border-[#E5A93C]/40 bg-[#1B1812] hover:bg-[#252016] text-[11px] font-medium text-[#E5A93C] disabled:opacity-60"
+                    className="w-full inline-flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-md border border-[#E5A93C]/50 bg-amber-50 hover:bg-amber-100 dark:bg-[#1B1812] dark:hover:bg-[#252016] text-[11px] font-medium text-amber-800 dark:text-[#E5A93C] disabled:opacity-60"
                   >
                     <AudioLines className="w-3.5 h-3.5" />
                     <span>
@@ -557,9 +557,9 @@ export function SourceIngestPanel({
             <button
               type="button"
               onClick={() => fileInputRef.current?.click()}
-              className="w-full flex items-center justify-center gap-2 px-3 py-2 rounded-lg border border-dashed border-white/15 bg-[#0B0B0E] hover:border-[#E5A93C]/50 text-xs font-medium text-[#C8C3BA] transition-colors"
+              className="w-full flex items-center justify-center gap-2 px-3 py-2 rounded-lg border border-dashed border-[#C7C1B5] dark:border-white/15 bg-[#FFFFFF] dark:bg-[#0B0B0E] hover:border-[#E5A93C] text-xs font-medium text-[#3F3F46] dark:text-[#C8C3BA] transition-colors"
             >
-              <Upload className="w-3.5 h-3.5 text-[#E5A93C]" />
+              <Upload className="w-3.5 h-3.5 text-amber-600 dark:text-[#E5A93C]" />
               <span>Cargar PDF, TXT o Audio (MP3 / WAV / M4A / OGG)</span>
             </button>
           )}
@@ -570,7 +570,7 @@ export function SourceIngestPanel({
               type="button"
               onClick={handlePlanChapters}
               disabled={analyzingChapters || isProducing || autoProducingChapters}
-              className="mt-2 w-full inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg border border-[#38B2AC]/40 bg-[#102121] hover:bg-[#152D2D] disabled:opacity-60 text-[11px] font-medium text-[#5EEAD4]"
+              className="mt-2 w-full inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg border border-teal-600/35 dark:border-[#38B2AC]/40 bg-teal-50 hover:bg-teal-100 dark:bg-[#102121] dark:hover:bg-[#152D2D] disabled:opacity-60 text-[11px] font-medium text-teal-800 dark:text-[#5EEAD4]"
             >
               <ListOrdered className="w-3.5 h-3.5 shrink-0" />
               <span>
@@ -584,13 +584,13 @@ export function SourceIngestPanel({
 
         {/* Sequential 1-by-1 Chapter Pipeline */}
         {project.chapterPlan && project.chapterPlan.chapters.length > 0 && (
-          <div className="p-3 rounded-lg border border-white/10 bg-[#0B0B0E] space-y-2.5">
+          <div className="p-3 rounded-lg border border-[#DCD6CA] dark:border-white/10 bg-[#FFFFFF] dark:bg-[#0B0B0E] space-y-2.5">
             <div className="flex items-center justify-between gap-2 text-[11px]">
-              <span className="font-semibold text-[#F2F0EB] flex items-center gap-1.5">
-                <ListOrdered className="w-3.5 h-3.5 text-[#E5A93C]" />
+              <span className="font-semibold text-[#18181B] dark:text-[#F2F0EB] flex items-center gap-1.5">
+                <ListOrdered className="w-3.5 h-3.5 text-amber-600 dark:text-[#E5A93C]" />
                 <span>Producción 1 a 1 ({chapterState.completedCount}/{chapterState.totalCount})</span>
               </span>
-              <span className="font-mono-tech text-[#8D8981] truncate max-w-[120px]">
+              <span className="font-mono-tech text-[#57534E] dark:text-[#8D8981] truncate max-w-[120px]">
                 {project.chapterPlan.sourceFilename}
               </span>
             </div>
@@ -604,10 +604,10 @@ export function SourceIngestPanel({
                     key={ch.index}
                     className={`px-2.5 py-2 rounded-md border text-[11px] flex items-start justify-between gap-2 ${
                       isDone
-                        ? 'border-[#38B2AC]/30 bg-[#0E1D1D] text-[#D4CFC7]'
+                        ? 'border-teal-600/30 dark:border-[#38B2AC]/30 bg-teal-50/70 dark:bg-[#0E1D1D] text-[#27272A] dark:text-[#D4CFC7]'
                         : isNext
-                          ? 'border-[#E5A93C]/50 bg-[#1A160E] text-[#F2F0EB]'
-                          : 'border-white/5 bg-[#121217] text-[#7D7971]'
+                          ? 'border-[#E5A93C]/55 bg-amber-50 dark:bg-[#1A160E] text-[#18181B] dark:text-[#F2F0EB]'
+                          : 'border-[#E2DDD3] dark:border-white/5 bg-[#F5F3EE] dark:bg-[#121217] text-[#57534E] dark:text-[#7D7971]'
                     }`}
                   >
                     <div className="min-w-0">
@@ -620,11 +620,11 @@ export function SourceIngestPanel({
                     </div>
                     <span className="shrink-0 pt-0.5">
                       {isDone ? (
-                        <CheckCircle2 className="w-3.5 h-3.5 text-[#38B2AC]" />
+                        <CheckCircle2 className="w-3.5 h-3.5 text-teal-700 dark:text-[#38B2AC]" />
                       ) : isNext ? (
-                        <Play className="w-3.5 h-3.5 text-[#E5A93C]" />
+                        <Play className="w-3.5 h-3.5 text-amber-600 dark:text-[#E5A93C]" />
                       ) : (
-                        <Lock className="w-3 h-3 text-[#6E6A63]" />
+                        <Lock className="w-3 h-3 text-[#78746C] dark:text-[#6E6A63]" />
                       )}
                     </span>
                   </div>
@@ -650,7 +650,7 @@ export function SourceIngestPanel({
                     onClick={() => {
                       stopAutoChaptersRef.current = true;
                     }}
-                    className="inline-flex items-center justify-center gap-1 px-2.5 py-1.5 rounded-md border border-[#EF4444]/40 bg-[#2E1313] text-[#FCA5A5] text-[11px] font-medium"
+                    className="inline-flex items-center justify-center gap-1 px-2.5 py-1.5 rounded-md border border-red-300 dark:border-[#EF4444]/40 bg-red-50 dark:bg-[#2E1313] text-red-700 dark:text-[#FCA5A5] text-[11px] font-medium"
                   >
                     <Square className="w-3 h-3" />
                     <span>Pausar cola</span>
@@ -660,7 +660,7 @@ export function SourceIngestPanel({
                     type="button"
                     onClick={handleAutoProduceAllChapters}
                     disabled={isProducing}
-                    className="inline-flex items-center justify-center gap-1 px-2.5 py-1.5 rounded-md border border-[#38B2AC]/40 bg-[#102625] hover:bg-[#163433] disabled:opacity-60 text-[#5EEAD4] text-[11px] font-medium"
+                    className="inline-flex items-center justify-center gap-1 px-2.5 py-1.5 rounded-md border border-teal-600/35 dark:border-[#38B2AC]/40 bg-teal-50 hover:bg-teal-100 dark:bg-[#102625] dark:hover:bg-[#163433] disabled:opacity-60 text-teal-800 dark:text-[#5EEAD4] text-[11px] font-medium"
                   >
                     <Play className="w-3 h-3" />
                     <span>Auto 1 a 1</span>
@@ -668,7 +668,7 @@ export function SourceIngestPanel({
                 )}
               </div>
             ) : (
-              <div className="text-[11px] text-[#5EEAD4] font-medium">
+              <div className="text-[11px] text-teal-700 dark:text-[#5EEAD4] font-medium">
                 Todos los capítulos producidos en orden cronológico.
               </div>
             )}
@@ -676,16 +676,16 @@ export function SourceIngestPanel({
         )}
 
         {quickAudioReport && (
-          <div className="p-3 rounded-lg border border-[#38B2AC]/35 bg-[#101F1F] space-y-1.5 text-[11px]">
-            <div className="font-semibold text-[#5EEAD4]">
+          <div className="p-3 rounded-lg border border-teal-600/35 dark:border-[#38B2AC]/35 bg-teal-50 dark:bg-[#101F1F] space-y-1.5 text-[11px]">
+            <div className="font-semibold text-teal-800 dark:text-[#5EEAD4]">
               Pre-análisis sonoro completado
             </div>
-            <p className="text-[#D4CFC7]">
-              <strong className="text-[#F2F0EB]">Narración:</strong>{' '}
+            <p className="text-[#27272A] dark:text-[#D4CFC7]">
+              <strong className="text-[#18181B] dark:text-[#F2F0EB]">Narración:</strong>{' '}
               {quickAudioReport.narrationStyle}
             </p>
-            <p className="text-[#D4CFC7]">
-              <strong className="text-[#F2F0EB]">Ritmo:</strong>{' '}
+            <p className="text-[#27272A] dark:text-[#D4CFC7]">
+              <strong className="text-[#18181B] dark:text-[#F2F0EB]">Ritmo:</strong>{' '}
               {quickAudioReport.rhythmAndPacing}
             </p>
           </div>
@@ -695,7 +695,7 @@ export function SourceIngestPanel({
         <div>
           <label
             htmlFor="sequence-title-input"
-            className="block text-xs font-medium text-[#C8C3BA] mb-1"
+            className="block text-xs font-medium text-[#3F3F46] dark:text-[#C8C3BA] mb-1"
           >
             Título del capítulo o secuencia
           </label>
@@ -709,7 +709,7 @@ export function SourceIngestPanel({
                 ? 'Ej: Escena Sonora: La Llamada Nocturna'
                 : 'Ej: Capítulo I: La Llegada al Puerto'
             }
-            className="w-full rounded-lg border border-white/12 bg-[#0B0B0E] px-3 py-2 text-xs text-[#F2F0EB] placeholder:text-[#6E6A63] focus:border-[#E5A93C] focus:outline-none"
+            className="w-full rounded-lg border border-[#D6D1C7] dark:border-white/12 bg-[#FFFFFF] dark:bg-[#0B0B0E] px-3 py-2 text-xs text-[#18181B] dark:text-[#F2F0EB] placeholder:text-[#78746C] dark:placeholder:text-[#6E6A63] focus:border-[#E5A93C] focus:outline-none"
           />
         </div>
 
@@ -718,7 +718,7 @@ export function SourceIngestPanel({
           <div>
             <label
               htmlFor="director-style-select"
-              className="block text-xs font-medium text-[#C8C3BA] mb-1"
+              className="block text-xs font-medium text-[#3F3F46] dark:text-[#C8C3BA] mb-1"
             >
               Estilo y firma cinematográfica
             </label>
@@ -726,7 +726,7 @@ export function SourceIngestPanel({
               id="director-style-select"
               value={directorStyle}
               onChange={(e) => setDirectorStyle(e.target.value)}
-              className="w-full rounded-lg border border-white/12 bg-[#0B0B0E] px-3 py-2 text-xs text-[#F2F0EB] focus:border-[#E5A93C] focus:outline-none"
+              className="w-full rounded-lg border border-[#D6D1C7] dark:border-white/12 bg-[#FFFFFF] dark:bg-[#0B0B0E] px-3 py-2 text-xs text-[#18181B] dark:text-[#F2F0EB] focus:border-[#E5A93C] focus:outline-none"
             >
               {DIRECTOR_STYLES.map((style) => (
                 <option key={style.id} value={style.label}>
@@ -740,7 +740,7 @@ export function SourceIngestPanel({
             <div>
               <label
                 htmlFor="resolution-tier-select"
-                className="block text-xs font-medium text-[#C8C3BA] mb-1"
+                className="block text-xs font-medium text-[#3F3F46] dark:text-[#C8C3BA] mb-1"
               >
                 Definición
               </label>
@@ -748,7 +748,7 @@ export function SourceIngestPanel({
                 id="resolution-tier-select"
                 value={targetResolution}
                 onChange={(e) => setTargetResolution(e.target.value as ResolutionTier)}
-                className="w-full rounded-lg border border-white/12 bg-[#0B0B0E] px-2 py-2 text-xs font-mono-tech text-[#E5A93C] focus:border-[#E5A93C] focus:outline-none"
+                className="w-full rounded-lg border border-[#D6D1C7] dark:border-white/12 bg-[#FFFFFF] dark:bg-[#0B0B0E] px-2 py-2 text-xs font-mono-tech font-medium text-amber-700 dark:text-[#E5A93C] focus:border-[#E5A93C] focus:outline-none"
               >
                 {RESOLUTION_OPTIONS.map((opt) => (
                   <option key={opt.value} value={opt.value}>
@@ -761,7 +761,7 @@ export function SourceIngestPanel({
             <div>
               <label
                 htmlFor="aspect-ratio-select"
-                className="block text-xs font-medium text-[#C8C3BA] mb-1"
+                className="block text-xs font-medium text-[#3F3F46] dark:text-[#C8C3BA] mb-1"
               >
                 Formato
               </label>
@@ -769,7 +769,7 @@ export function SourceIngestPanel({
                 id="aspect-ratio-select"
                 value={aspectRatio}
                 onChange={(e) => setAspectRatio(e.target.value)}
-                className="w-full rounded-lg border border-white/12 bg-[#0B0B0E] px-2 py-2 text-xs text-[#F2F0EB] font-mono-tech focus:border-[#E5A93C] focus:outline-none"
+                className="w-full rounded-lg border border-[#D6D1C7] dark:border-white/12 bg-[#FFFFFF] dark:bg-[#0B0B0E] px-2 py-2 text-xs text-[#18181B] dark:text-[#F2F0EB] font-mono-tech focus:border-[#E5A93C] focus:outline-none"
               >
                 {ASPECT_RATIO_OPTIONS.map((opt) => (
                   <option key={opt.value} value={opt.value}>
@@ -782,7 +782,7 @@ export function SourceIngestPanel({
             <div>
               <label
                 htmlFor="thinking-depth-select"
-                className="block text-xs font-medium text-[#C8C3BA] mb-1"
+                className="block text-xs font-medium text-[#3F3F46] dark:text-[#C8C3BA] mb-1"
               >
                 Análisis
               </label>
@@ -790,7 +790,7 @@ export function SourceIngestPanel({
                 id="thinking-depth-select"
                 value={thinkingDepth}
                 onChange={(e) => setThinkingDepth(e.target.value as ThinkingDepth)}
-                className="w-full rounded-lg border border-white/12 bg-[#0B0B0E] px-2 py-2 text-xs text-[#F2F0EB] focus:border-[#E5A93C] focus:outline-none"
+                className="w-full rounded-lg border border-[#D6D1C7] dark:border-white/12 bg-[#FFFFFF] dark:bg-[#0B0B0E] px-2 py-2 text-xs text-[#18181B] dark:text-[#F2F0EB] focus:border-[#E5A93C] focus:outline-none"
               >
                 <option value="standard">Estándar</option>
                 <option value="deep">Profundo</option>
@@ -804,7 +804,7 @@ export function SourceIngestPanel({
           <div className="flex items-center justify-between mb-1">
             <label
               htmlFor="source-text-input"
-              className="text-xs font-medium text-[#C8C3BA]"
+              className="text-xs font-medium text-[#3F3F46] dark:text-[#C8C3BA]"
             >
               Texto fuente, historia o dictado
             </label>
@@ -815,8 +815,8 @@ export function SourceIngestPanel({
               aria-label="Dictar historia por micrófono"
               className={`inline-flex items-center gap-1 text-[11px] font-medium transition-colors ${
                 recordingTarget === 'source'
-                  ? 'text-[#FCA5A5]'
-                  : 'text-[#E5A93C] hover:text-[#F4C46A]'
+                  ? 'text-red-600 dark:text-[#FCA5A5]'
+                  : 'text-amber-700 hover:text-amber-800 dark:text-[#E5A93C] dark:hover:text-[#F4C46A]'
               }`}
             >
               {recordingTarget === 'source' ? (
@@ -840,16 +840,16 @@ export function SourceIngestPanel({
             value={sourceText}
             onChange={(e) => setSourceText(e.target.value)}
             placeholder="Pega el capítulo, escribe tu historia o usa el micrófono para dictar una nueva historia..."
-            className="w-full rounded-lg border border-white/12 bg-[#0B0B0E] p-2.5 text-xs text-[#E6E2DA] leading-relaxed placeholder:text-[#6E6A63] focus:border-[#E5A93C] focus:outline-none resize-y"
+            className="w-full rounded-lg border border-[#D6D1C7] dark:border-white/12 bg-[#FFFFFF] dark:bg-[#0B0B0E] p-2.5 text-xs text-[#18181B] dark:text-[#E6E2DA] leading-relaxed placeholder:text-[#78746C] dark:placeholder:text-[#6E6A63] focus:border-[#E5A93C] focus:outline-none resize-y"
           />
         </div>
 
         {/* Continuity Bible + Direct Microphone Dictation */}
-        <div className="pt-2 border-t border-white/10">
+        <div className="pt-2 border-t border-[#E2DDD3] dark:border-white/10">
           <div className="flex flex-wrap items-center justify-between gap-2 mb-1.5">
             <label
               htmlFor="continuity-bible-input"
-              className="text-xs font-medium text-[#C8C3BA]"
+              className="text-xs font-medium text-[#3F3F46] dark:text-[#C8C3BA]"
             >
               Biblia de continuidad
             </label>
@@ -861,8 +861,8 @@ export function SourceIngestPanel({
                 aria-label="Dictar nota de dirección a la Biblia de continuidad"
                 className={`inline-flex items-center gap-1 text-[11px] font-medium transition-colors ${
                   recordingTarget === 'bible'
-                    ? 'text-[#FCA5A5]'
-                    : 'text-[#5EEAD4] hover:text-[#99F6E4]'
+                    ? 'text-red-600 dark:text-[#FCA5A5]'
+                    : 'text-teal-700 hover:text-teal-800 dark:text-[#5EEAD4] dark:hover:text-[#99F6E4]'
                 }`}
               >
                 {recordingTarget === 'bible' ? (
@@ -884,7 +884,7 @@ export function SourceIngestPanel({
                 type="button"
                 onClick={() => handleSaveBible()}
                 disabled={savingBible}
-                className="inline-flex items-center gap-1 text-[11px] font-medium text-[#E5A93C] hover:text-[#F4C46A] disabled:opacity-50"
+                className="inline-flex items-center gap-1 text-[11px] font-medium text-amber-700 hover:text-amber-800 dark:text-[#E5A93C] dark:hover:text-[#F4C46A] disabled:opacity-50"
               >
                 {savedBibleOk ? (
                   <>
@@ -906,17 +906,17 @@ export function SourceIngestPanel({
             value={continuityBible}
             onChange={(e) => setContinuityBible(e.target.value)}
             placeholder="Reglas visuales y notas de dirección dictadas por micrófono o acumuladas..."
-            className="w-full rounded-lg border border-white/12 bg-[#0B0B0E] p-2 text-xs text-[#A7A299] leading-relaxed focus:border-[#E5A93C] focus:outline-none resize-y"
+            className="w-full rounded-lg border border-[#D6D1C7] dark:border-white/12 bg-[#FFFFFF] dark:bg-[#0B0B0E] p-2 text-xs text-[#27272A] dark:text-[#A7A299] leading-relaxed placeholder:text-[#78746C] dark:placeholder:text-[#6E6A63] focus:border-[#E5A93C] focus:outline-none resize-y"
           />
           {micStatusMsg && (
-            <p className="mt-1 text-[11px] text-[#5EEAD4]">{micStatusMsg}</p>
+            <p className="mt-1 text-[11px] text-teal-700 dark:text-[#5EEAD4]">{micStatusMsg}</p>
           )}
         </div>
 
         {(validationError || errorMessage) && (
           <div
             role="alert"
-            className="rounded-lg border border-[#EF4444]/35 bg-[#3B1515]/50 px-3 py-2 text-xs text-[#FCA5A5] leading-relaxed"
+            className="rounded-lg border border-red-300 dark:border-[#EF4444]/35 bg-red-50 dark:bg-[#3B1515]/50 px-3 py-2 text-xs text-red-700 dark:text-[#FCA5A5] leading-relaxed"
           >
             {validationError || errorMessage}
           </div>

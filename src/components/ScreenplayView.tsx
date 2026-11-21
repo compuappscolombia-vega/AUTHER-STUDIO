@@ -275,7 +275,7 @@ export function ScreenplayView({
     <div
       className={
         isReadingMode
-          ? 'fixed inset-0 z-40 bg-[#0B0B0E] flex flex-col overflow-hidden'
+          ? 'fixed inset-0 z-40 bg-[#F5F3EE] dark:bg-[#0B0B0E] flex flex-col overflow-hidden'
           : 'space-y-5 max-w-7xl'
       }
     >
@@ -283,21 +283,21 @@ export function ScreenplayView({
       <div
         className={`no-print flex flex-wrap items-center justify-between gap-3 ${
           isReadingMode
-            ? 'px-6 py-3.5 border-b border-white/10 bg-[#101015] shrink-0'
-            : 'pb-4 border-b border-white/10'
+            ? 'px-6 py-3.5 border-b border-[#E2DDD3] dark:border-white/10 bg-[#FAF8F4] dark:bg-[#101015] shrink-0'
+            : 'pb-4 border-b border-[#E2DDD3] dark:border-white/10'
         }`}
       >
         <div>
           <div className="flex items-center gap-2">
-            <BookOpen className="w-4 h-4 text-[#E5A93C]" />
-            <h2 className="font-display text-lg font-semibold text-[#F2F0EB]">
+            <BookOpen className="w-4 h-4 text-amber-600 dark:text-[#E5A93C]" />
+            <h2 className="font-display text-lg font-semibold text-[#18181B] dark:text-[#F2F0EB]">
               {isReadingMode ? `${sequence.title} · Modo Lectura` : 'Guion Técnico-Literario'}
             </h2>
           </div>
-          <p className="text-xs text-[#8D8981] font-mono-tech mt-0.5 tabular-nums">
+          <p className="text-xs text-[#57534E] dark:text-[#8D8981] font-mono-tech mt-0.5 tabular-nums">
             {readingStats.sceneCount} escenas · {readingStats.wordCount} palabras (~
             {readingStats.estimatedMinutes} min) · {sequence.aspectRatio} ·{' '}
-            <span className={pdfAllowed ? 'text-[#38B2AC]' : 'text-[#E5A93C]'}>
+            <span className={pdfAllowed ? 'text-teal-700 dark:text-[#38B2AC] font-medium' : 'text-amber-700 dark:text-[#E5A93C] font-medium'}>
               {pdfAllowed ? 'Versión Final' : 'Borrador'}
             </span>
           </p>
@@ -305,7 +305,7 @@ export function ScreenplayView({
 
         <div className="flex flex-wrap items-center gap-2">
           {isReadingMode && (
-            <div className="flex items-center gap-1 rounded-lg border border-white/12 bg-[#14141B] p-1">
+            <div className="flex items-center gap-1 rounded-lg border border-[#DCD6CA] dark:border-white/12 bg-[#FFFFFF] dark:bg-[#14141B] p-1">
               {(
                 [
                   { id: 'normal', label: 'Compacto' },
@@ -320,7 +320,7 @@ export function ScreenplayView({
                   className={`px-2 py-1 rounded text-[11px] font-medium whitespace-nowrap ${
                     fontScale === preset.id
                       ? 'bg-[#E5A93C] text-[#0B0B0E] font-semibold'
-                      : 'text-[#C8C3BA] hover:text-white'
+                      : 'text-[#3F3F46] hover:text-[#18181B] dark:text-[#C8C3BA] dark:hover:text-white'
                   }`}
                 >
                   {preset.label}
@@ -335,8 +335,8 @@ export function ScreenplayView({
             aria-pressed={isReadingMode}
             className={`inline-flex items-center gap-1.5 px-3 py-2 rounded-lg border text-xs font-semibold whitespace-nowrap transition-colors ${
               isReadingMode
-                ? 'border-[#38B2AC]/55 bg-[#102625] text-[#5EEAD4] hover:bg-[#163433]'
-                : 'border-[#E5A93C]/55 bg-[#1B1812] text-[#E5A93C] hover:bg-[#272116]'
+                ? 'border-teal-600/45 dark:border-[#38B2AC]/55 bg-teal-50 dark:bg-[#102625] text-teal-800 dark:text-[#5EEAD4] hover:bg-teal-100 dark:hover:bg-[#163433]'
+                : 'border-[#E5A93C]/55 bg-amber-50 hover:bg-amber-100 dark:bg-[#1B1812] dark:hover:bg-[#272116] text-amber-800 dark:text-[#E5A93C]'
             }`}
           >
             {isReadingMode ? (
@@ -355,7 +355,7 @@ export function ScreenplayView({
           <button
             type="button"
             onClick={() => onOpenVoiceoverModal(selectedBeat?.beatKey)}
-            className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg border border-[#38B2AC]/45 bg-[#102625] hover:bg-[#163433] text-xs font-medium text-[#5EEAD4] whitespace-nowrap"
+            className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg border border-teal-600/35 dark:border-[#38B2AC]/45 bg-teal-50 hover:bg-teal-100 dark:bg-[#102625] dark:hover:bg-[#163433] text-xs font-medium text-teal-800 dark:text-[#5EEAD4] whitespace-nowrap"
           >
             <AudioLines className="w-3.5 h-3.5" />
             <span>Voz Provisional (TTS)</span>
@@ -365,12 +365,12 @@ export function ScreenplayView({
             type="button"
             onClick={() => setShowNotesSidebar((v) => !v)}
             aria-pressed={showNotesSidebar}
-            className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg border border-white/12 bg-[#14141B] hover:bg-[#1C1C26] text-xs font-medium text-[#E6E2DA] whitespace-nowrap"
+            className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg border border-[#D6D1C7] dark:border-white/12 bg-[#FFFFFF] hover:bg-[#F1EFE9] dark:bg-[#14141B] dark:hover:bg-[#1C1C26] text-xs font-medium text-[#27272A] dark:text-[#E6E2DA] whitespace-nowrap"
           >
             {showNotesSidebar ? (
-              <PanelRightClose className="w-3.5 h-3.5 text-[#E5A93C]" />
+              <PanelRightClose className="w-3.5 h-3.5 text-amber-600 dark:text-[#E5A93C]" />
             ) : (
-              <PanelRightOpen className="w-3.5 h-3.5 text-[#E5A93C]" />
+              <PanelRightOpen className="w-3.5 h-3.5 text-amber-600 dark:text-[#E5A93C]" />
             )}
             <span>Notas al pie ({allNotes.length})</span>
           </button>
@@ -386,14 +386,14 @@ export function ScreenplayView({
             }
             className={`inline-flex items-center gap-1.5 px-3 py-2 rounded-lg border text-xs font-medium whitespace-nowrap transition-colors ${
               pdfAllowed
-                ? 'border-[#E5A93C]/50 bg-[#1B1812] hover:bg-[#272116] text-[#F2F0EB]'
-                : 'border-white/10 bg-[#121217] text-[#6E6A63] cursor-not-allowed'
+                ? 'border-[#E5A93C]/50 bg-amber-50 hover:bg-amber-100 dark:bg-[#1B1812] dark:hover:bg-[#272116] text-[#18181B] dark:text-[#F2F0EB]'
+                : 'border-[#E2DDD3] dark:border-white/10 bg-[#F1EFE9] dark:bg-[#121217] text-[#78746C] dark:text-[#6E6A63] cursor-not-allowed'
             }`}
           >
             {pdfAllowed ? (
-              <FileCheck2 className="w-3.5 h-3.5 text-[#E5A93C]" />
+              <FileCheck2 className="w-3.5 h-3.5 text-amber-600 dark:text-[#E5A93C]" />
             ) : (
-              <Lock className="w-3.5 h-3.5 text-[#6E6A63]" />
+              <Lock className="w-3.5 h-3.5 text-[#78746C] dark:text-[#6E6A63]" />
             )}
             <span>
               {exportingPdf
@@ -407,25 +407,25 @@ export function ScreenplayView({
           <button
             type="button"
             onClick={handleExportMarkdown}
-            className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg border border-white/12 bg-[#14141B] hover:bg-[#1C1C26] text-xs font-medium text-[#E6E2DA] whitespace-nowrap"
+            className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg border border-[#D6D1C7] dark:border-white/12 bg-[#FFFFFF] hover:bg-[#F1EFE9] dark:bg-[#14141B] dark:hover:bg-[#1C1C26] text-xs font-medium text-[#27272A] dark:text-[#E6E2DA] whitespace-nowrap"
           >
-            <Download className="w-3.5 h-3.5 text-[#E5A93C]" />
+            <Download className="w-3.5 h-3.5 text-amber-600 dark:text-[#E5A93C]" />
             <span>Markdown</span>
           </button>
           <button
             type="button"
             onClick={handleExportFountain}
-            className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg border border-white/12 bg-[#14141B] hover:bg-[#1C1C26] text-xs font-medium text-[#E6E2DA] whitespace-nowrap"
+            className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg border border-[#D6D1C7] dark:border-white/12 bg-[#FFFFFF] hover:bg-[#F1EFE9] dark:bg-[#14141B] dark:hover:bg-[#1C1C26] text-xs font-medium text-[#27272A] dark:text-[#E6E2DA] whitespace-nowrap"
           >
-            <Download className="w-3.5 h-3.5 text-[#E5A93C]" />
+            <Download className="w-3.5 h-3.5 text-amber-600 dark:text-[#E5A93C]" />
             <span>Fountain</span>
           </button>
           <button
             type="button"
             onClick={() => window.print()}
-            className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg border border-white/12 bg-[#14141B] hover:bg-[#1C1C26] text-xs font-medium text-[#E6E2DA] whitespace-nowrap"
+            className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg border border-[#D6D1C7] dark:border-white/12 bg-[#FFFFFF] hover:bg-[#F1EFE9] dark:bg-[#14141B] dark:hover:bg-[#1C1C26] text-xs font-medium text-[#27272A] dark:text-[#E6E2DA] whitespace-nowrap"
           >
-            <Printer className="w-3.5 h-3.5 text-[#E5A93C]" />
+            <Printer className="w-3.5 h-3.5 text-amber-600 dark:text-[#E5A93C]" />
             <span>Imprimir</span>
           </button>
 
@@ -435,9 +435,9 @@ export function ScreenplayView({
               onClick={onOpenShortcuts}
               aria-label="Ver atajos de teclado"
               title="Atajos de teclado (?)"
-              className="inline-flex items-center gap-1.5 px-2.5 py-2 rounded-lg border border-white/12 bg-[#14141B] hover:bg-[#1C1C26] text-xs font-medium text-[#E6E2DA] whitespace-nowrap"
+              className="inline-flex items-center gap-1.5 px-2.5 py-2 rounded-lg border border-[#D6D1C7] dark:border-white/12 bg-[#FFFFFF] hover:bg-[#F1EFE9] dark:bg-[#14141B] dark:hover:bg-[#1C1C26] text-xs font-medium text-[#27272A] dark:text-[#E6E2DA] whitespace-nowrap"
             >
-              <Keyboard className="w-3.5 h-3.5 text-[#E5A93C]" />
+              <Keyboard className="w-3.5 h-3.5 text-amber-600 dark:text-[#E5A93C]" />
               <span>Atajos</span>
             </button>
           )}
@@ -461,20 +461,20 @@ export function ScreenplayView({
           }
         >
           <article
-            className={`screenplay-print-sheet rounded-xl border border-white/10 bg-[#121217] px-6 sm:px-12 py-10 font-mono-tech text-[#E2DDD4] ${
+            className={`screenplay-print-sheet rounded-xl border border-[#DCD6CA] dark:border-white/10 bg-[#FFFFFF] dark:bg-[#121217] px-6 sm:px-12 py-10 font-mono-tech text-[#27272A] dark:text-[#E2DDD4] ${
               typo.sheetText
-            } ${isReadingMode ? 'max-w-4xl mx-auto shadow-2xl' : ''}`}
+            } ${isReadingMode ? 'max-w-4xl mx-auto shadow-xl dark:shadow-2xl' : 'shadow-xs dark:shadow-none'}`}
           >
-            <header className="mb-10 pb-6 border-b border-white/10 text-center space-y-1.5">
-              <div className="text-sm font-semibold tracking-wider text-[#F2F0EB]">
+            <header className="mb-10 pb-6 border-b border-[#E2DDD3] dark:border-white/10 text-center space-y-1.5">
+              <div className="text-sm font-semibold tracking-wider text-[#18181B] dark:text-[#F2F0EB]">
                 {project.title.toUpperCase()}
               </div>
-              <div className="text-xs text-[#E5A93C]">{sequence.title}</div>
-              <div className="text-[11px] text-[#8D8981]">
+              <div className="text-xs text-amber-700 dark:text-[#E5A93C] font-medium">{sequence.title}</div>
+              <div className="text-[11px] text-[#57534E] dark:text-[#8D8981]">
                 {sequence.cameraSystem} · {sequence.aspectRatio} ·{' '}
                 {pdfAllowed ? 'VERSIÓN FINAL' : 'BORRADOR'}
               </div>
-              <p className="no-print text-[11px] text-[#8D8981] pt-2">
+              <p className="no-print text-[11px] text-[#57534E] dark:text-[#8D8981] pt-2">
                 Haz clic en cualquier línea de diálogo o acción para vincular una Nota al pie de Director o Productor.
               </p>
             </header>
@@ -486,7 +486,7 @@ export function ScreenplayView({
                   className="space-y-4"
                 >
                   <h3
-                    className={`${typo.sceneHeading} font-semibold text-[#F2F0EB] tracking-wide border-b border-white/10 pb-1.5`}
+                    className={`${typo.sceneHeading} font-semibold text-[#18181B] dark:text-[#F2F0EB] tracking-wide border-b border-[#E2DDD3] dark:border-white/10 pb-1.5`}
                   >
                     {scene.sceneNumber}. {scene.slugline}
                   </h3>
@@ -514,10 +514,10 @@ export function ScreenplayView({
                           }}
                           className={`group relative rounded-lg px-3 py-2 -mx-3 transition-colors border ${
                             isSelected
-                              ? 'border-[#E5A93C]/65 bg-[#1B1810]'
+                              ? 'border-[#E5A93C]/70 bg-amber-50 dark:bg-[#1B1810]'
                               : beatNotes.length > 0
-                                ? 'border-white/10 bg-[#16161E] hover:border-[#E5A93C]/35'
-                                : 'border-transparent hover:border-white/10 hover:bg-white/[0.02]'
+                                ? 'border-[#DCD6CA] dark:border-white/10 bg-[#FAF8F4] dark:bg-[#16161E] hover:border-[#E5A93C]/45'
+                                : 'border-transparent hover:border-[#DCD6CA] dark:hover:border-white/10 hover:bg-[#FAF8F4] dark:hover:bg-white/[0.02]'
                           }`}
                         >
                           <div className="flex items-start justify-between gap-3">
@@ -530,26 +530,26 @@ export function ScreenplayView({
                                 <div
                                   className={`${typo.dialogueMeasureClass} mx-auto space-y-1 py-0.5 text-left`}
                                 >
-                                  <div className="text-center font-semibold text-[#F2F0EB] tracking-wider">
+                                  <div className="text-center font-semibold text-[#18181B] dark:text-[#F2F0EB] tracking-wider">
                                     {(beat.character || 'PERSONAJE').toUpperCase()}
                                   </div>
                                   {beat.parenthetical && (
-                                    <div className="text-center text-xs text-[#9A968E]">
+                                    <div className="text-center text-xs text-[#57534E] dark:text-[#9A968E]">
                                       ({beat.parenthetical})
                                     </div>
                                   )}
-                                  <p className="text-[#EAE6DE]">{beat.text}</p>
+                                  <p className="text-[#18181B] dark:text-[#EAE6DE]">{beat.text}</p>
                                 </div>
                               ) : beat.type === 'camera' ? (
-                                <p className="text-[0.9em] text-[#E5A93C]">
+                                <p className="text-[0.9em] text-amber-800 dark:text-[#E5A93C]">
                                   <span className="font-semibold">[CÁMARA]</span> {beat.text}
                                 </p>
                               ) : beat.type === 'sound' ? (
-                                <p className="text-[0.9em] text-[#9DB4CC]">
+                                <p className="text-[0.9em] text-sky-800 dark:text-[#9DB4CC]">
                                   <span className="font-semibold">[SONIDO]</span> {beat.text}
                                 </p>
                               ) : (
-                                <p className="text-[#D4CFC7]">{beat.text}</p>
+                                <p className="text-[#27272A] dark:text-[#D4CFC7]">{beat.text}</p>
                               )}
                             </button>
 
@@ -562,7 +562,7 @@ export function ScreenplayView({
                                 }}
                                 aria-label={`Generar voz provisional para Escena ${scene.sceneNumber} línea ${beatIdx + 1}`}
                                 title="Previsualizar voz provisional (TTS)"
-                                className={`p-1.5 rounded border border-white/10 bg-[#0D0D12] text-[#8D8981] hover:text-[#5EEAD4] hover:border-[#38B2AC]/45 transition-opacity ${
+                                className={`p-1.5 rounded border border-[#D6D1C7] dark:border-white/10 bg-[#FFFFFF] dark:bg-[#0D0D12] text-[#57534E] dark:text-[#8D8981] hover:text-teal-700 dark:hover:text-[#5EEAD4] hover:border-teal-600/45 dark:hover:border-[#38B2AC]/45 transition-opacity ${
                                   isSelected ? 'opacity-100' : 'opacity-0 group-hover:opacity-100 focus:opacity-100'
                                 }`}
                               >
@@ -574,7 +574,7 @@ export function ScreenplayView({
                                   className={`px-2 py-0.5 rounded font-mono-tech text-[10px] font-semibold tabular-nums ${
                                     unresolvedCount > 0
                                       ? 'bg-[#E5A93C] text-[#0B0B0E]'
-                                      : 'bg-[#102625] text-[#5EEAD4] border border-[#38B2AC]/35'
+                                      : 'bg-teal-50 dark:bg-[#102625] text-teal-800 dark:text-[#5EEAD4] border border-teal-600/35 dark:border-[#38B2AC]/35'
                                   }`}
                                   title={`${beatNotes.length} nota(s) al pie vinculadas`}
                                 >
@@ -597,29 +597,29 @@ export function ScreenplayView({
         {showNotesSidebar && (
           <aside
             aria-label="Notas al pie para revisión de guion"
-            className={`no-print w-full lg:w-[360px] xl:w-[390px] shrink-0 border border-white/10 bg-[#101015] flex flex-col ${
+            className={`no-print w-full lg:w-[360px] xl:w-[390px] shrink-0 border border-[#E2DDD3] dark:border-white/10 bg-[#FAF8F4] dark:bg-[#101015] flex flex-col ${
               isReadingMode
                 ? 'lg:h-full border-y-0 border-r-0 rounded-none'
                 : 'rounded-xl lg:sticky lg:top-4 max-h-[82vh]'
             }`}
           >
-            <div className="px-4 py-3.5 border-b border-white/10 flex items-center justify-between gap-2 shrink-0">
+            <div className="px-4 py-3.5 border-b border-[#E2DDD3] dark:border-white/10 flex items-center justify-between gap-2 shrink-0">
               <div>
-                <h3 className="font-display text-sm font-semibold text-[#F2F0EB]">
+                <h3 className="font-display text-sm font-semibold text-[#18181B] dark:text-[#F2F0EB]">
                   Revisión y Notas al Pie
                 </h3>
-                <p className="text-[11px] text-[#8D8981]">
+                <p className="text-[11px] text-[#57534E] dark:text-[#8D8981]">
                   Anotaciones de Director o Productor vinculadas al guion
                 </p>
               </div>
-              <div className="flex items-center gap-1 rounded-md border border-white/10 bg-[#14141B] p-0.5 text-[10px]">
+              <div className="flex items-center gap-1 rounded-md border border-[#DCD6CA] dark:border-white/10 bg-[#FFFFFF] dark:bg-[#14141B] p-0.5 text-[10px]">
                 <button
                   type="button"
                   onClick={() => setNotesScope('all')}
                   className={`px-2 py-1 rounded font-medium ${
                     notesScope === 'all'
                       ? 'bg-[#E5A93C] text-[#0B0B0E] font-semibold'
-                      : 'text-[#C8C3BA]'
+                      : 'text-[#3F3F46] dark:text-[#C8C3BA]'
                   }`}
                 >
                   Todas ({allNotes.length})
@@ -630,7 +630,7 @@ export function ScreenplayView({
                   className={`px-2 py-1 rounded font-medium ${
                     notesScope === 'selected'
                       ? 'bg-[#E5A93C] text-[#0B0B0E] font-semibold'
-                      : 'text-[#C8C3BA]'
+                      : 'text-[#3F3F46] dark:text-[#C8C3BA]'
                   }`}
                 >
                   Línea
@@ -641,33 +641,33 @@ export function ScreenplayView({
             {/* Add Footnote Form */}
             <form
               onSubmit={handleSubmitNote}
-              className="p-4 border-b border-white/10 bg-[#0D0D12] space-y-3 shrink-0"
+              className="p-4 border-b border-[#E2DDD3] dark:border-white/10 bg-[#F5F3EE] dark:bg-[#0D0D12] space-y-3 shrink-0"
             >
               {selectedBeat ? (
-                <div className="rounded-lg border border-[#E5A93C]/35 bg-[#18150E] px-3 py-2 space-y-1">
-                  <div className="text-[10px] font-mono-tech text-[#E5A93C]">
+                <div className="rounded-lg border border-[#E5A93C]/45 bg-amber-50 dark:bg-[#18150E] px-3 py-2 space-y-1">
+                  <div className="text-[10px] font-mono-tech font-medium text-amber-800 dark:text-[#E5A93C]">
                     Escena {selectedBeat.sceneNumber} · {BEAT_TYPE_LABELS[selectedBeat.beatType]}
                   </div>
-                  <p className="text-xs text-[#EAE6DE] line-clamp-2 italic">
+                  <p className="text-xs text-[#18181B] dark:text-[#EAE6DE] line-clamp-2 italic">
                     &ldquo;{selectedBeat.lineExcerpt}&rdquo;
                   </p>
                 </div>
               ) : (
-                <p className="text-xs text-[#8D8981]">
+                <p className="text-xs text-[#57534E] dark:text-[#8D8981]">
                   Haz clic en cualquier línea del guion para adjuntar una nota al pie.
                 </p>
               )}
 
               <div className="grid grid-cols-2 gap-2">
                 <div>
-                  <label htmlFor="note-role-select" className="block text-[10px] text-[#9A968E] mb-1">
+                  <label htmlFor="note-role-select" className="block text-[10px] text-[#57534E] dark:text-[#9A968E] mb-1">
                     Rol de revisión
                   </label>
                   <select
                     id="note-role-select"
                     value={authorRole}
                     onChange={(e) => setAuthorRole(e.target.value as ScreenplayNoteRole)}
-                    className="w-full rounded-lg border border-white/12 bg-[#14141B] px-2.5 py-1.5 text-xs text-[#F2F0EB] focus:border-[#E5A93C] focus:outline-none"
+                    className="w-full rounded-lg border border-[#D6D1C7] dark:border-white/12 bg-[#FFFFFF] dark:bg-[#14141B] px-2.5 py-1.5 text-xs text-[#18181B] dark:text-[#F2F0EB] focus:border-[#E5A93C] focus:outline-none"
                   >
                     <option value="director">Director</option>
                     <option value="producer">Productor</option>
@@ -675,7 +675,7 @@ export function ScreenplayView({
                 </div>
 
                 <div>
-                  <label htmlFor="note-author-input" className="block text-[10px] text-[#9A968E] mb-1">
+                  <label htmlFor="note-author-input" className="block text-[10px] text-[#57534E] dark:text-[#9A968E] mb-1">
                     Firma (opcional)
                   </label>
                   <input
@@ -684,7 +684,7 @@ export function ScreenplayView({
                     value={authorName}
                     onChange={(e) => setAuthorName(e.target.value)}
                     placeholder={authorRole === 'producer' ? 'Productor' : 'Director'}
-                    className="w-full rounded-lg border border-white/12 bg-[#14141B] px-2.5 py-1.5 text-xs text-[#F2F0EB] placeholder:text-[#6E6A63] focus:border-[#E5A93C] focus:outline-none"
+                    className="w-full rounded-lg border border-[#D6D1C7] dark:border-white/12 bg-[#FFFFFF] dark:bg-[#14141B] px-2.5 py-1.5 text-xs text-[#18181B] dark:text-[#F2F0EB] placeholder:text-[#78746C] dark:placeholder:text-[#6E6A63] focus:border-[#E5A93C] focus:outline-none"
                   />
                 </div>
               </div>
@@ -699,12 +699,12 @@ export function ScreenplayView({
                   value={noteText}
                   onChange={(e) => setNoteText(e.target.value)}
                   placeholder="Añadir nota técnica, ajuste de diálogo o presupuesto..."
-                  className="w-full rounded-lg border border-white/12 bg-[#14141B] p-2.5 text-xs text-[#F2F0EB] placeholder:text-[#6E6A63] focus:border-[#E5A93C] focus:outline-none resize-none"
+                  className="w-full rounded-lg border border-[#D6D1C7] dark:border-white/12 bg-[#FFFFFF] dark:bg-[#14141B] p-2.5 text-xs text-[#18181B] dark:text-[#F2F0EB] placeholder:text-[#78746C] dark:placeholder:text-[#6E6A63] focus:border-[#E5A93C] focus:outline-none resize-none"
                 />
               </div>
 
               {noteError && (
-                <p role="alert" className="text-[11px] text-[#FCA5A5]">
+                <p role="alert" className="text-[11px] text-red-700 dark:text-[#FCA5A5]">
                   {noteError}
                 </p>
               )}
@@ -722,7 +722,7 @@ export function ScreenplayView({
             {/* Footnotes List */}
             <div className="flex-1 overflow-y-auto p-4 space-y-2.5">
               {visibleNotes.length === 0 ? (
-                <p className="text-xs text-[#8D8981] text-center py-6 leading-relaxed">
+                <p className="text-xs text-[#57534E] dark:text-[#8D8981] text-center py-6 leading-relaxed">
                   {notesScope === 'selected'
                     ? 'Esta línea no tiene notas aún. Añade una nota arriba.'
                     : 'No hay notas al pie todavía. Selecciona una línea de acción o diálogo en el guion para iniciar la revisión.'}
@@ -736,10 +736,10 @@ export function ScreenplayView({
                       key={item.id}
                       className={`rounded-lg border p-3 space-y-2 transition-colors ${
                         item.resolved
-                          ? 'border-white/8 bg-[#121217] opacity-75'
+                          ? 'border-[#E2DDD3] dark:border-white/8 bg-[#EFECE5] dark:bg-[#121217] opacity-75'
                           : isSelectedLine
-                            ? 'border-[#E5A93C]/55 bg-[#18150E]'
-                            : 'border-white/10 bg-[#14141C]'
+                            ? 'border-[#E5A93C]/65 bg-amber-50 dark:bg-[#18150E]'
+                            : 'border-[#DCD6CA] dark:border-white/10 bg-[#FFFFFF] dark:bg-[#14141C]'
                       }`}
                     >
                       <div className="flex items-center justify-between gap-2 text-[10px] font-mono-tech">
@@ -759,13 +759,13 @@ export function ScreenplayView({
                           <span
                             className={
                               item.authorRole === 'producer'
-                                ? 'text-[#5EEAD4]'
-                                : 'text-[#E5A93C]'
+                                ? 'text-teal-700 dark:text-[#5EEAD4]'
+                                : 'text-amber-700 dark:text-[#E5A93C]'
                             }
                           >
                             {item.authorRole === 'producer' ? 'PRODUCTOR' : 'DIRECTOR'}
                           </span>
-                          <span className="text-[#8D8981]">
+                          <span className="text-[#57534E] dark:text-[#8D8981]">
                             {' '}
                             · Esc. {item.sceneNumber} ({BEAT_TYPE_LABELS[item.beatType]})
                           </span>
@@ -777,7 +777,7 @@ export function ScreenplayView({
                             disabled={isBusy}
                             onClick={() => void handleResolveToggle(item)}
                             title={item.resolved ? 'Reabrir nota' : 'Marcar como resuelta'}
-                            className="p-1 rounded text-[#8D8981] hover:text-[#5EEAD4] hover:bg-white/5"
+                            className="p-1 rounded text-[#57534E] dark:text-[#8D8981] hover:text-teal-700 dark:hover:text-[#5EEAD4] hover:bg-black/5 dark:hover:bg-white/5"
                           >
                             {item.resolved ? (
                               <RotateCcw className="w-3 h-3" />
@@ -790,26 +790,28 @@ export function ScreenplayView({
                             disabled={isBusy}
                             onClick={() => void handleDelete(item.id)}
                             aria-label={`Eliminar nota ${item.id}`}
-                            className="p-1 rounded text-[#8D8981] hover:text-[#FCA5A5] hover:bg-white/5"
+                            className="p-1 rounded text-[#57534E] dark:text-[#8D8981] hover:text-red-700 dark:hover:text-[#FCA5A5] hover:bg-black/5 dark:hover:bg-white/5"
                           >
                             <Trash2 className="w-3 h-3" />
                           </button>
                         </div>
                       </div>
 
-                      <p className="text-[11px] text-[#9A968E] italic line-clamp-1">
+                      <p className="text-[11px] text-[#57534E] dark:text-[#9A968E] italic line-clamp-1">
                         &ldquo;{item.lineExcerpt}&rdquo;
                       </p>
 
                       <p
                         className={`text-xs leading-relaxed ${
-                          item.resolved ? 'line-through text-[#8D8981]' : 'text-[#EAE6DE]'
+                          item.resolved
+                            ? 'line-through text-[#78746C] dark:text-[#8D8981]'
+                            : 'text-[#18181B] dark:text-[#EAE6DE]'
                         }`}
                       >
                         {item.note}
                       </p>
 
-                      <div className="text-[10px] text-[#7D7971]">
+                      <div className="text-[10px] text-[#57534E] dark:text-[#7D7971]">
                         {item.authorName} ·{' '}
                         {item.resolved ? 'Resuelta' : 'Pendiente'}
                       </div>

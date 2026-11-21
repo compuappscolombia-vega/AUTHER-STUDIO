@@ -608,20 +608,20 @@ export function ThreeDPrevisView({ sequence }: ThreeDPrevisViewProps) {
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <div className="flex items-center gap-2">
-            <Box className="w-4 h-4 text-[#E5A93C]" />
-            <h2 className="font-display text-lg font-semibold text-[#F2F0EB]">
+            <Box className="w-4 h-4 text-amber-600 dark:text-[#E5A93C]" />
+            <h2 className="font-display text-lg font-semibold text-[#18181B] dark:text-[#F2F0EB]">
               Previsualización 3D de Set y Bloqueo de Cámara
             </h2>
           </div>
-          <p className="text-xs text-[#8D8981] mt-0.5">
+          <p className="text-xs text-[#57534E] dark:text-[#8D8981] mt-0.5">
             Arrastra para orbitar, usa la rueda para zoom o cambia de lente y temperatura Kelvin antes de renderizar Nano/Omni Flash.
           </p>
         </div>
 
-        <div className="flex items-center gap-2 text-xs font-mono-tech text-[#9A968E] tabular-nums">
+        <div className="flex items-center gap-2 text-xs font-mono-tech text-[#57534E] dark:text-[#9A968E] tabular-nums">
           <span>{sequence.cameraSystem}</span>
           <span aria-hidden="true">·</span>
-          <span className="text-[#E5A93C]">
+          <span className="text-amber-700 dark:text-[#E5A93C]">
             {currentPresetMeta.lensMm}mm · {sequence.aspectRatio}
           </span>
           {softwareMode && (
@@ -634,7 +634,7 @@ export function ThreeDPrevisView({ sequence }: ThreeDPrevisViewProps) {
       </div>
 
       {/* 3D Cinema Stage */}
-      <div className="relative rounded-xl border border-white/12 bg-[#0B0C10] overflow-hidden h-[500px] sm:h-[540px]">
+      <div className="relative rounded-xl border border-[#D4CEC2] dark:border-white/12 bg-[#0B0C10] overflow-hidden h-[500px] sm:h-[540px]">
         <div
           ref={containerRef}
           aria-label="Escenario 3D interactivo de previsualización"

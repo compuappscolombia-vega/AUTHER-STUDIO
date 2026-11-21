@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import {
+  Bot,
   CheckCircle2,
   Clapperboard,
   FileDown,
@@ -11,6 +12,8 @@ import {
   UserCog,
 } from 'lucide-react';
 import type {
+  ApiCapability,
+  ApiProviderPublicSummary,
   AudioAnalysisReport,
   LearningCategory,
   LearningLesson,
@@ -42,6 +45,7 @@ import { StudioSettingsModal } from './components/StudioSettingsModal';
 import { AdminAgentLabModal } from './components/AdminAgentLabModal';
 import { VoiceoverPreviewModal } from './components/VoiceoverPreviewModal';
 import { KeyboardShortcutsModal } from './components/KeyboardShortcutsModal';
+import { ExternalProductionGuideModal } from './components/ExternalProductionGuideModal';
 import { useAuth } from './context/AuthContext';
 import {
   canExportPdfForSequence,
@@ -66,6 +70,12 @@ import {
   isEditableEventTarget,
   resolveStudioShortcutAction,
 } from './utils/keyboardShortcuts';
+import {
+  applyStudioTheme,
+  persistStudioTheme,
+  readInitialTheme,
+  type StudioTheme,
+} from './utils/theme';
 import {
   addLessonToFirestore,
   deleteLessonFromFirestore,
@@ -92,9 +102,17 @@ function persistProjectsCache(key: string, projects: ProductionProject[]) {
 }
 
 export default function App() {
-  const { user, loading: authLoading, isVerified, isAdminSession, isLocalDevPreview } = useAuth();
+  const {
+    user,
+    loading: authLoading,
+    isVerified,
+    isAdminSession,
+    adminToken,
+    isLocalDevPreview,
+  } = useAuth();
   const skipCloudSync = isLocalDevPreview || isAdminSession;
 
+  const [theme, setTheme] = useState<StudioTheme>(() => readInitialTheme());
   const [projects, setProjects] = useState<ProductionProject[]>([]);
   const [activeProjectId, setActiveProjectId] = useState<string>('');
   const [activeSequenceId, setActiveSequenceId] = useState<string>('');
@@ -114,6 +132,12 @@ export default function App() {
   const [adminLabOpen, setAdminLabOpen] = useState(false);
   const [liveVoiceOpen, setLiveVoiceOpen] = useState(false);
   const [voiceoverModalOpen, setVoiceoverModalOpen] = useState(false);
+  const [externalGuideOpen, setExternalGuideOpen] = useState(false);
+  const [externalGuideScope, setExternalGuideScope] = useState<'sequence' | 'project'>('sequence');
+  const [externalGuideAutoDelivered, setExternalGuideAutoDelivered] = useState(false);
+  const [providersStatus, setProvidersStatus] = useState<
+    Record<ApiCapability, ApiProviderPublicSummary> | null
+  >(null);
   const [voiceoverBeatKey, setVoiceoverBeatKey] = useState<string | null>(null);
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
   const [isReadingMode, setIsReadingMode] = useState(false);
@@ -121,6 +145,21 @@ export default function App() {
   const [finalizingSeq, setFinalizingSeq] = useState(false);
   const [exportingPdf, setExportingPdf] = useState(false);
   const [produceError, setProduceError] = useState<string | null>(null);
+
+  useEffect(() => {
+    applyStudioTheme(theme);
+    persistStudioTheme(theme);
+  }, [theme]);
+
+  useEffect(() => {
+    if (!isAdminSession && adminLabOpen) {
+      setAdminLabOpen(false);
+    }
+  }, [isAdminSession, adminLabOpen]);
+
+  function handleToggleTheme(next: StudioTheme) {
+    setTheme(next);
+  }
 
   // Purge legacy unauthenticated cache if present
   useEffect(() => {
@@ -311,17 +350,17 @@ export default function App() {
 
   if (authLoading) {
     return (
-      <div className="min-h-screen bg-[#0B0B0E] text-[#F2F0EB] flex flex-col items-center justify-center gap-3 p-6">
-        <Clapperboard className="w-7 h-7 text-[#E5A93C]" />
+      <div className="min-h-screen bg-[#F5F3EE] text-[#18181B] dark:bg-[#0B0B0E] dark:text-[#F2F0EB] flex flex-col items-center justify-center gap-3 p-6">
+        <Clapperboard className="w-7 h-7 text-amber-600 dark:text-[#E5A93C]" />
         <div className="font-display text-base font-semibold">AUTEUR Studio</div>
-        <p className="text-xs text-[#8D8981]">Verificando sesión de usuario...</p>
+        <p className="text-xs text-[#57534E] dark:text-[#8D8981]">Verificando sesión de usuario...</p>
       </div>
     );
   }
 
   // Mandatory Authentication Gate: unauthenticated or unverified users cannot enter the workspace
   if (!user || !isVerified) {
-    return <AuthGate />;
+    return <AuthGate theme={theme} onToggleTheme={handleToggleTheme} />;
   }
 
   const currentUid = user.uid;
@@ -543,6 +582,9 @@ export default function App() {
       });
       setActiveSequenceId(newSeq.id);
       setActiveTab('vision');
+      setExternalGuideScope('sequence');
+      setExternalGuideAutoDelivered(true);
+      setExternalGuideOpen(true);
 
       if (!skipCloudSync) {
         try {
@@ -892,7 +934,7 @@ export default function App() {
   const hideChromeForReading = activeTab === 'screenplay' && isReadingMode;
 
   return (
-    <div className="h-screen flex flex-col overflow-hidden bg-[#0B0B0E] text-[#F2F0EB]">
+    <div className="h-screen flex flex-col overflow-hidden bg-[#F5F3EE] text-[#18181B] dark:bg-[#0B0B0E] dark:text-[#F2F0EB] transition-colors">
       {!hideChromeForReading && (
         <div className="no-print shrink-0">
           <TopBar
@@ -904,12 +946,14 @@ export default function App() {
             isAdmin={isAdminSession}
             userLabel={userLabel}
             onToggleMobileMenu={() => setMobileMenuOpen(true)}
+            theme={theme}
+            onToggleTheme={handleToggleTheme}
           />
 
           {/* Mobile Tab Bar */}
           <nav
             aria-label="Vistas móviles del estudio"
-            className="flex md:hidden items-center justify-between gap-1 px-2.5 py-1.5 border-b border-white/10 bg-[#101015] overflow-x-auto shrink-0"
+            className="flex md:hidden items-center justify-between gap-1 px-2.5 py-1.5 border-b border-[#E2DDD3] dark:border-white/10 bg-[#FAF8F4] dark:bg-[#101015] overflow-x-auto shrink-0"
           >
             {(
               [
@@ -927,8 +971,8 @@ export default function App() {
                 onClick={() => setActiveTab(tab.id)}
                 className={`px-2 py-1.5 rounded-md text-[11px] font-medium whitespace-nowrap shrink-0 ${
                   activeTab === tab.id
-                    ? 'bg-[#E5A93C] text-[#0B0B0E]'
-                    : 'text-[#9A968E] hover:text-[#F2F0EB]'
+                    ? 'bg-[#E5A93C] text-[#0B0B0E] font-semibold'
+                    : 'text-[#57534E] hover:text-[#18181B] dark:text-[#9A968E] dark:hover:text-[#F2F0EB]'
                 }`}
               >
                 {tab.label}
@@ -966,23 +1010,25 @@ export default function App() {
             <>
               {/* Active Project & Sequence Bar */}
               {activeProject && (
-                <div className="no-print border-b border-white/10 bg-[#101015] px-4 sm:px-5 py-3 flex flex-wrap items-center justify-between gap-3 shrink-0">
+                <div className="no-print border-b border-[#E2DDD3] dark:border-white/10 bg-[#FAF8F4] dark:bg-[#101015] px-4 sm:px-5 py-3 flex flex-wrap items-center justify-between gap-3 shrink-0">
                   <div className="min-w-0 max-w-full">
                     <div className="flex flex-wrap items-center gap-2.5">
-                      <h1 className="font-display text-base sm:text-lg font-semibold text-[#F2F0EB] truncate">
+                      <h1 className="font-display text-base sm:text-lg font-semibold text-[#18181B] dark:text-[#F2F0EB] truncate">
                         {activeProject.title}
                       </h1>
                       {activeSequence && (
                         <span
-                          className={`text-[11px] font-mono-tech ${
-                            isFinalSequence ? 'text-[#38B2AC]' : 'text-[#E5A93C]'
+                          className={`text-[11px] font-mono-tech font-medium ${
+                            isFinalSequence
+                              ? 'text-teal-700 dark:text-[#38B2AC]'
+                              : 'text-amber-700 dark:text-[#E5A93C]'
                           }`}
                         >
                           {isFinalSequence ? 'Versión Final' : 'Borrador'}
                         </span>
                       )}
                     </div>
-                    <div className="text-xs text-[#8D8981] truncate">
+                    <div className="text-xs text-[#57534E] dark:text-[#8D8981] truncate">
                       {activeProject.genreStyle}
                     </div>
                   </div>
@@ -997,7 +1043,7 @@ export default function App() {
                           id="active-sequence-select"
                           value={activeSequence?.id || ''}
                           onChange={(e) => setActiveSequenceId(e.target.value)}
-                          className="w-full sm:w-auto sm:max-w-[220px] rounded-lg border border-white/12 bg-[#0B0B0E] px-3 py-1.5 text-xs text-[#F2F0EB] focus:border-[#E5A93C] focus:outline-none"
+                          className="w-full sm:w-auto sm:max-w-[220px] rounded-lg border border-[#D6D1C7] dark:border-white/12 bg-[#FFFFFF] dark:bg-[#0B0B0E] px-3 py-1.5 text-xs text-[#18181B] dark:text-[#F2F0EB] focus:border-[#E5A93C] focus:outline-none"
                         >
                           {activeProject.sequences.map((seq) => (
                             <option key={seq.id} value={seq.id}>
@@ -1013,7 +1059,7 @@ export default function App() {
                         type="button"
                         onClick={handleApproveFinalVersion}
                         disabled={finalizingSeq}
-                        className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-[#38B2AC]/45 bg-[#102625] hover:bg-[#163433] text-xs font-medium text-[#5EEAD4] whitespace-nowrap shrink-0 disabled:opacity-60"
+                        className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-teal-600/35 dark:border-[#38B2AC]/45 bg-teal-50 hover:bg-teal-100 dark:bg-[#102625] dark:hover:bg-[#163433] text-xs font-medium text-teal-800 dark:text-[#5EEAD4] whitespace-nowrap shrink-0 disabled:opacity-60"
                       >
                         <CheckCircle2 className="w-3.5 h-3.5" />
                         <span>
@@ -1034,18 +1080,34 @@ export default function App() {
                         }
                         className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-xs font-medium whitespace-nowrap shrink-0 transition-colors ${
                           isFinalSequence
-                            ? 'border-[#E5A93C]/45 bg-[#1B1812] hover:bg-[#272116] text-[#F2F0EB]'
-                            : 'border-white/10 bg-[#121217] text-[#6E6A63] cursor-not-allowed'
+                            ? 'border-[#E5A93C]/50 bg-amber-50 hover:bg-amber-100 dark:bg-[#1B1812] dark:hover:bg-[#272116] text-[#18181B] dark:text-[#F2F0EB]'
+                            : 'border-[#E2DDD3] dark:border-white/10 bg-[#F1EFE9] dark:bg-[#121217] text-[#78746C] dark:text-[#6E6A63] cursor-not-allowed'
                         }`}
                       >
                         {isFinalSequence ? (
-                          <FileDown className="w-3.5 h-3.5 text-[#E5A93C]" />
+                          <FileDown className="w-3.5 h-3.5 text-amber-600 dark:text-[#E5A93C]" />
                         ) : (
-                          <Lock className="w-3.5 h-3.5 text-[#6E6A63]" />
+                          <Lock className="w-3.5 h-3.5 text-[#78746C] dark:text-[#6E6A63]" />
                         )}
                         <span>
                           {isFinalSequence ? 'Bitácora PDF' : 'PDF bloqueado (Borrador)'}
                         </span>
+                      </button>
+                    )}
+
+                    {activeSequence && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setExternalGuideScope('sequence');
+                          setExternalGuideAutoDelivered(false);
+                          setExternalGuideOpen(true);
+                        }}
+                        title="Abrir guía detallada paso a paso generada por Agente Arthur para producir en una plataforma externa"
+                        className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-amber-600/40 dark:border-[#E5A93C]/45 bg-amber-50 hover:bg-amber-100 dark:bg-[#1B1710] dark:hover:bg-[#262015] text-xs font-medium text-amber-800 dark:text-[#E5A93C] whitespace-nowrap shrink-0"
+                      >
+                        <Bot className="w-3.5 h-3.5 shrink-0" />
+                        <span>Guía Externa Arthur</span>
                       </button>
                     )}
 
@@ -1055,9 +1117,9 @@ export default function App() {
                         onClick={handleExportLibraryPdf}
                         disabled={exportingPdf}
                         title="Exportar biblioteca de todas las secuencias en Versión Final"
-                        className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-white/12 bg-[#16161E] hover:bg-[#1E1E29] text-xs font-medium text-[#E6E2DA] whitespace-nowrap shrink-0"
+                        className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-[#D6D1C7] dark:border-white/12 bg-[#FFFFFF] hover:bg-[#F1EFE9] dark:bg-[#16161E] dark:hover:bg-[#1E1E29] text-xs font-medium text-[#27272A] dark:text-[#E6E2DA] whitespace-nowrap shrink-0"
                       >
-                        <Library className="w-3.5 h-3.5 text-[#E5A93C]" />
+                        <Library className="w-3.5 h-3.5 text-amber-600 dark:text-[#E5A93C]" />
                         <span>Biblioteca PDF</span>
                       </button>
                     )}
@@ -1065,16 +1127,16 @@ export default function App() {
                     <button
                       type="button"
                       onClick={() => setShowIngest((v) => !v)}
-                      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-white/12 bg-[#16161E] hover:bg-[#1E1E29] text-xs font-medium text-[#E6E2DA] whitespace-nowrap shrink-0"
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-[#D6D1C7] dark:border-white/12 bg-[#FFFFFF] hover:bg-[#F1EFE9] dark:bg-[#16161E] dark:hover:bg-[#1E1E29] text-xs font-medium text-[#27272A] dark:text-[#E6E2DA] whitespace-nowrap shrink-0"
                     >
                       {showIngest ? (
                         <>
-                          <PanelLeftClose className="w-3.5 h-3.5 text-[#E5A93C]" />
+                          <PanelLeftClose className="w-3.5 h-3.5 text-amber-600 dark:text-[#E5A93C]" />
                           <span>Ocultar mesa</span>
                         </>
                       ) : (
                         <>
-                          <PanelLeftOpen className="w-3.5 h-3.5 text-[#E5A93C]" />
+                          <PanelLeftOpen className="w-3.5 h-3.5 text-amber-600 dark:text-[#E5A93C]" />
                           <span>Ingresar material</span>
                         </>
                       )}
@@ -1104,6 +1166,11 @@ export default function App() {
                 onOpenIngest={() => setShowIngest(true)}
                 onApproveFinal={handleApproveFinalVersion}
                 onOpenLiveVoice={() => setLiveVoiceOpen(true)}
+                onOpenExternalGuide={() => {
+                  setExternalGuideScope('sequence');
+                  setExternalGuideAutoDelivered(false);
+                  setExternalGuideOpen(true);
+                }}
                 finalizingSeq={finalizingSeq}
               />
             </>
@@ -1140,19 +1207,21 @@ export default function App() {
                   userId={currentUid}
                   project={activeProject}
                   studioSettings={studioSettings}
+                  providersStatus={providersStatus}
                   onEnsureProjectSynced={() => ensureProjectSyncedOnServer(activeProject)}
                   onProjectUpdated={handleProjectMediaUpdated}
                   onGoToVision={() => setActiveTab('vision')}
+                  onOpenSettings={() => setSettingsOpen(true)}
                 />
               ) : isProducing ? (
                 <div className="py-20 max-w-md mx-auto text-center space-y-3">
-                  <Clapperboard className="w-8 h-8 text-[#E5A93C] mx-auto" />
-                  <h2 className="font-display text-lg font-semibold text-[#F2F0EB]">
-                    Diseñando producción cinematográfica
+                  <Clapperboard className="w-8 h-8 text-amber-600 dark:text-[#E5A93C] mx-auto" />
+                  <h2 className="font-display text-lg font-semibold text-[#18181B] dark:text-[#F2F0EB]">
+                    Agente Arthur dirigiendo producción
                   </h2>
-                  <p className="text-xs text-[#9A968E] leading-relaxed">
+                  <p className="text-xs text-[#57534E] dark:text-[#9A968E] leading-relaxed">
                     Estructurando óptica de cámara, temperaturas de luz, lista de planos, mezcla
-                    Dolby Atmos, voces en off realistas, VFX y guion completo.
+                    Dolby Atmos, voces en off realistas, VFX, guion y guía paso a paso externa.
                   </p>
                 </div>
               ) : activeSequence && activeProject ? (
@@ -1165,6 +1234,11 @@ export default function App() {
                       intelligence={studioIntelligence}
                       onRateSequence={handleRateSequence}
                       onApplyEnhancement={handleApplyEnhancement}
+                      onOpenExternalGuide={() => {
+                        setExternalGuideScope('sequence');
+                        setExternalGuideAutoDelivered(false);
+                        setExternalGuideOpen(true);
+                      }}
                     />
                   )}
                   {activeTab === 'shots' && (
@@ -1207,8 +1281,10 @@ export default function App() {
                       projectId={activeProject.id}
                       sequence={activeSequence}
                       defaultResolution={studioSettings.defaultResolution}
+                      providersStatus={providersStatus}
                       onEnsureProjectSynced={() => ensureProjectSyncedOnServer(activeProject)}
                       onProjectMediaUpdated={handleProjectMediaUpdated}
+                      onOpenSettings={() => setSettingsOpen(true)}
                     />
                   )}
                   {activeTab === 'previs3d' && (
@@ -1220,11 +1296,11 @@ export default function App() {
                 </>
               ) : activeProject ? (
                 <div className="py-20 max-w-md mx-auto text-center space-y-4">
-                  <Clapperboard className="w-9 h-9 text-[#E5A93C] mx-auto" />
-                  <h2 className="font-display text-xl font-semibold text-[#F2F0EB]">
+                  <Clapperboard className="w-9 h-9 text-amber-600 dark:text-[#E5A93C] mx-auto" />
+                  <h2 className="font-display text-xl font-semibold text-[#18181B] dark:text-[#F2F0EB]">
                     Producción lista para rodar
                   </h2>
-                  <p className="text-sm text-[#9A968E] leading-relaxed">
+                  <p className="text-sm text-[#57534E] dark:text-[#9A968E] leading-relaxed">
                     Carga un capítulo de libro, un audiolibro en MP3/WAV/M4A/OGG o dicta tu
                     historia en la mesa de ingesta para dirigir la primera secuencia.
                   </p>
@@ -1232,7 +1308,7 @@ export default function App() {
                     <button
                       type="button"
                       onClick={() => setShowIngest(true)}
-                      className="px-4 py-2 rounded-lg bg-[#E5A93C] text-[#0B0B0E] text-xs font-semibold"
+                      className="px-4 py-2 rounded-lg bg-[#E5A93C] hover:bg-[#EDA949] text-[#0B0B0E] text-xs font-semibold"
                     >
                       Abrir mesa de ingesta
                     </button>
@@ -1240,12 +1316,12 @@ export default function App() {
                 </div>
               ) : (
                 <div className="py-20 max-w-lg mx-auto text-center space-y-5">
-                  <Clapperboard className="w-10 h-10 text-[#E5A93C] mx-auto" />
+                  <Clapperboard className="w-10 h-10 text-amber-600 dark:text-[#E5A93C] mx-auto" />
                   <div className="space-y-2">
-                    <h1 className="font-display text-2xl font-semibold text-[#F2F0EB]">
+                    <h1 className="font-display text-2xl font-semibold text-[#18181B] dark:text-[#F2F0EB]">
                       Nuevo proyecto cinematográfico
                     </h1>
-                    <p className="text-sm text-[#9A968E] leading-relaxed">
+                    <p className="text-sm text-[#57534E] dark:text-[#9A968E] leading-relaxed">
                       Tu mesa de dirección comienza completamente en blanco. Crea tu primer
                       proyecto para adaptar un libro, analizar un audiolibro o dirigir una
                       historia original desde cero.
@@ -1264,9 +1340,9 @@ export default function App() {
                       <button
                         type="button"
                         onClick={() => setAdminLabOpen(true)}
-                        className="inline-flex items-center gap-2 px-5 py-2.5 rounded-lg border border-[#E5A93C]/45 bg-[#1B1710] hover:bg-[#272116] text-[#F2F0EB] text-xs font-semibold transition-colors"
+                        className="inline-flex items-center gap-2 px-5 py-2.5 rounded-lg border border-[#E5A93C]/50 bg-amber-50 hover:bg-amber-100 dark:bg-[#1B1710] dark:hover:bg-[#272116] text-[#18181B] dark:text-[#F2F0EB] text-xs font-semibold transition-colors"
                       >
-                        <UserCog className="w-4 h-4 text-[#E5A93C]" />
+                        <UserCog className="w-4 h-4 text-amber-600 dark:text-[#E5A93C]" />
                         <span>Abrir Laboratorio del Agente</span>
                       </button>
                     )}
@@ -1293,20 +1369,23 @@ export default function App() {
       <AuthModal
         open={authOpen}
         onClose={() => setAuthOpen(false)}
-        onOpenAdminLab={() => setAdminLabOpen(true)}
+        onOpenAdminLab={isAdminSession ? () => setAdminLabOpen(true) : undefined}
       />
 
-      <AdminAgentLabModal
-        open={adminLabOpen}
-        userId={currentUid}
-        activeProject={activeProject}
-        activeSequence={activeSequence}
-        lessons={lessons}
-        onClose={() => setAdminLabOpen(false)}
-        onAddLesson={handleAddLesson}
-        onDeleteLesson={handleDeleteLesson}
-        onProjectSeeded={handleProjectSeeded}
-      />
+      {isAdminSession && (
+        <AdminAgentLabModal
+          open={adminLabOpen}
+          userId={currentUid}
+          adminToken={adminToken}
+          activeProject={activeProject}
+          activeSequence={activeSequence}
+          lessons={lessons}
+          onClose={() => setAdminLabOpen(false)}
+          onAddLesson={handleAddLesson}
+          onDeleteLesson={handleDeleteLesson}
+          onProjectSeeded={handleProjectSeeded}
+        />
+      )}
 
       <LearningModal
         open={learningOpen}
@@ -1319,9 +1398,23 @@ export default function App() {
 
       <StudioSettingsModal
         open={settingsOpen}
+        userId={currentUid}
         settings={studioSettings}
         onClose={() => setSettingsOpen(false)}
         onSaveSettings={handleSaveStudioSettings}
+        onProvidersChanged={setProvidersStatus}
+      />
+
+      <ExternalProductionGuideModal
+        open={externalGuideOpen}
+        project={activeProject}
+        sequence={activeSequence}
+        initialScope={externalGuideScope}
+        autoDelivered={externalGuideAutoDelivered}
+        onClose={() => {
+          setExternalGuideOpen(false);
+          setExternalGuideAutoDelivered(false);
+        }}
       />
 
       <LiveDirectorVoiceModal

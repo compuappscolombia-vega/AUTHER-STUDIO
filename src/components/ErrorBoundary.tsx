@@ -56,9 +56,9 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
   public render() {
     if (this.state.hasError) {
       return (
-        <div className="min-h-screen bg-[#0B0B0E] text-[#F2F0EB] flex items-center justify-center p-6">
-          <div className="max-w-md w-full rounded-xl border border-[#EF4444]/30 bg-[#14141A] p-6 space-y-4">
-            <div className="flex items-center gap-2.5 text-[#FCA5A5]">
+        <div className="min-h-screen bg-[#F5F3EE] dark:bg-[#0B0B0E] text-[#18181B] dark:text-[#F2F0EB] flex items-center justify-center p-6">
+          <div className="max-w-md w-full rounded-xl border border-red-300 dark:border-[#EF4444]/30 bg-[#FFFFFF] dark:bg-[#14141A] p-6 space-y-4 shadow-xl dark:shadow-none">
+            <div className="flex items-center gap-2.5 text-red-700 dark:text-[#FCA5A5]">
               <AlertTriangle className="w-5 h-5 shrink-0" />
               <h1 className="font-display text-lg font-semibold">
                 {this.state.isPermissionError
@@ -66,7 +66,7 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
                   : 'Error en AUTEUR Studio'}
               </h1>
             </div>
-            <p className="text-sm text-[#C8C3BA] leading-relaxed">{this.state.message}</p>
+            <p className="text-sm text-[#3F3F46] dark:text-[#C8C3BA] leading-relaxed">{this.state.message}</p>
             <button
               type="button"
               onClick={this.handleReset}

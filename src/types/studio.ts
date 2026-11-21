@@ -342,3 +342,81 @@ export interface AgentDiagnosticReport {
   auditedAt: string;
 }
 
+export type ApiCapability = 'image' | 'video' | 'core';
+
+export type ApiBillingTier = 'free' | 'paid' | 'auto';
+
+export type ApiProviderKind =
+  | 'gemini'
+  | 'openai'
+  | 'huggingface'
+  | 'fal'
+  | 'replicate'
+  | 'pollinations'
+  | 'custom_rest';
+
+export interface ApiProviderInput {
+  capability: ApiCapability;
+  providerHint?: ApiProviderKind | 'auto';
+  tierHint?: ApiBillingTier;
+  endpointUrl?: string;
+  apiKey?: string;
+  model?: string;
+  authHeader?: string;
+  authPrefix?: string;
+  label?: string;
+}
+
+export interface ApiProviderPublicSummary {
+  capability: ApiCapability;
+  configured: boolean;
+  source: 'user_vault' | 'server_env' | 'none';
+  providerKind: ApiProviderKind | null;
+  label: string;
+  tier: 'free' | 'paid' | 'unknown';
+  model: string;
+  endpointUrl: string;
+  hasKey: boolean;
+  keyPreview: string;
+  authHeader: string;
+  authPrefix: string;
+  supportsImageToVideo?: boolean;
+  lastTestedAt?: string;
+  lastStatus: 'ready' | 'unconfigured' | 'error';
+  lastMessage: string;
+}
+
+export interface ExternalGuideStepItem {
+  stepCode: string;
+  title: string;
+  subtitle?: string;
+  specs: Array<{ label: string; value: string }>;
+  instructions: string;
+  copyPromptLabel?: string;
+  copyPromptText?: string;
+  notes?: string;
+}
+
+export interface ExternalGuideSection {
+  stepNumber: number;
+  id: string;
+  title: string;
+  platformHint: string;
+  summary: string;
+  items: ExternalGuideStepItem[];
+}
+
+export interface ExternalProductionGuide {
+  agentName: string;
+  generatedAt: string;
+  scope: 'sequence' | 'project';
+  projectTitle: string;
+  genreStyle: string;
+  sequenceTitle: string;
+  aspectRatio: string;
+  targetResolution: ResolutionTier;
+  sections: ExternalGuideSection[];
+  markdown: string;
+  plainText: string;
+}
+

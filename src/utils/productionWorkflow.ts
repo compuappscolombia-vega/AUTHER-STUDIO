@@ -89,7 +89,7 @@ export function computeFilmDeliveryWorkflow(params: {
     nextActionTab = hasNotesOrReview ? 'storyboard' : 'screenplay';
     nextActionKind = 'open_tab';
     summaryHint = hasNotesOrReview
-      ? 'Paso 4 de 6: Genera imágenes 4K con Nano, simula el bloqueo en Pre-Vis 3D o crea clips con Omni Flash.'
+      ? 'Paso 4 de 6: Renderiza fotogramas y clips con tus APIs configuradas (free o de pago) o usa Pre-Vis 3D.'
       : 'Paso 3 de 6: Revisa el expediente técnico en Dirección, Planos/Voz en Off y añade Notas al pie en Guion.';
   } else if (!hasApprovedSequence) {
     currentStepIndex = 4;
@@ -152,7 +152,7 @@ export function computeFilmDeliveryWorkflow(params: {
       title: '4. Storyboard, 3D y Video',
       shortLabel: 'Visuales / Video',
       whatItDoes:
-        'Previsualiza cámara en Pre-Vis 3D, renderiza fotogramas Nano 4K y genera clips de video Omni Flash.',
+        'Previsualiza cámara en Pre-Vis 3D, renderiza fotogramas y clips con la API de Imágenes/Video que suministres.',
       completed: hasGeneratedMedia,
       actionTab: 'storyboard',
       actionLabel: 'Ir a Storyboard',
@@ -171,10 +171,10 @@ export function computeFilmDeliveryWorkflow(params: {
     {
       stepNumber: 6,
       id: 'trailer',
-      title: '6. Tráiler 30s y Entrega',
-      shortLabel: 'Tráiler / PDF',
+      title: '6. Tráiler 30s y Guía Externa',
+      shortLabel: 'Tráiler / Guía',
       whatItDoes:
-        'Ensambla el tráiler oficial de 30s (voz WAV + música Lyria + clips) y descarga la Bitácora PDF.',
+        'Ensambla el tráiler 30s, descarga la Bitácora PDF o sigue la Guía Paso a Paso Externa de Agente Arthur.',
       completed: hasTrailerDelivered,
       actionTab: 'trailer',
       actionLabel: 'Abrir Tráiler 30s',

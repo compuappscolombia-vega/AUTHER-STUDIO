@@ -21,24 +21,24 @@ export function TimelineBar({
   return (
     <section
       aria-label="Línea de tiempo de hitos aprobados"
-      className="border-b border-white/10 bg-[#0D0D12] px-4 sm:px-5 py-2.5 shrink-0"
+      className="border-b border-[#E2DDD3] dark:border-white/10 bg-[#FAF8F4] dark:bg-[#0D0D12] px-4 sm:px-5 py-2.5 shrink-0"
     >
       <div className="flex items-center justify-between gap-3 mb-2">
         <div className="flex items-center gap-2 min-w-0">
-          <Clock className="w-3.5 h-3.5 text-[#38B2AC] shrink-0" />
-          <h2 className="text-xs font-semibold text-[#E6E2DA] truncate">
+          <Clock className="w-3.5 h-3.5 text-teal-700 dark:text-[#38B2AC] shrink-0" />
+          <h2 className="text-xs font-semibold text-[#18181B] dark:text-[#E6E2DA] truncate">
             Línea de Tiempo — Secuencias Aprobadas
           </h2>
         </div>
-        <div className="text-[11px] font-mono-tech text-[#8D8981] whitespace-nowrap tabular-nums">
+        <div className="text-[11px] font-mono-tech text-[#57534E] dark:text-[#8D8981] whitespace-nowrap tabular-nums">
           {milestones.length}{' '}
           {milestones.length === 1 ? 'hito final' : 'hitos finales'}
         </div>
       </div>
 
       {milestones.length === 0 ? (
-        <div className="flex items-center gap-2 py-1.5 px-3 rounded-lg border border-white/8 bg-[#121218] text-xs text-[#8D8981]">
-          <Sparkles className="w-3.5 h-3.5 text-[#E5A93C] shrink-0" />
+        <div className="flex items-center gap-2 py-1.5 px-3 rounded-lg border border-[#E2DDD3] dark:border-white/8 bg-[#FFFFFF] dark:bg-[#121218] text-xs text-[#57534E] dark:text-[#8D8981]">
+          <Sparkles className="w-3.5 h-3.5 text-amber-600 dark:text-[#E5A93C] shrink-0" />
           <span className="truncate">
             Aprueba una secuencia como Versión Final para fijar hitos navegables en la línea de tiempo y habilitar el Tráiler de 30s.
           </span>
@@ -62,12 +62,12 @@ export function TimelineBar({
                   aria-current={isSelected ? 'step' : undefined}
                   className={`text-left min-w-[230px] max-w-[270px] px-3 py-2 rounded-lg border transition-colors focus-visible:outline-2 focus-visible:outline-[#E5A93C] ${
                     isSelected
-                      ? 'border-[#38B2AC] bg-[#112424] text-[#F2F0EB]'
-                      : 'border-white/10 bg-[#131319] hover:border-white/25 hover:bg-[#181820] text-[#D4CFC7]'
+                      ? 'border-teal-600 dark:border-[#38B2AC] bg-teal-50 dark:bg-[#112424] text-[#18181B] dark:text-[#F2F0EB]'
+                      : 'border-[#DCD6CA] dark:border-white/10 bg-[#FFFFFF] dark:bg-[#131319] hover:border-[#C2BBB0] dark:hover:border-white/25 hover:bg-[#F5F3EE] dark:hover:bg-[#181820] text-[#3F3F46] dark:text-[#D4CFC7]'
                   }`}
                 >
                   <div className="flex items-center justify-between gap-2 text-[11px] font-mono-tech tabular-nums">
-                    <span className="inline-flex items-center gap-1 text-[#5EEAD4] font-medium">
+                    <span className="inline-flex items-center gap-1 text-teal-700 dark:text-[#5EEAD4] font-medium">
                       <CheckCircle2 className="w-3 h-3 shrink-0" />
                       <span>
                         {m.chapterIndex
@@ -75,15 +75,15 @@ export function TimelineBar({
                           : `Hito ${String(m.milestoneNumber).padStart(2, '0')}`}
                       </span>
                     </span>
-                    <span className="text-[#E5A93C]">{m.targetResolution}</span>
+                    <span className="text-amber-700 dark:text-[#E5A93C] font-medium">{m.targetResolution}</span>
                   </div>
 
-                  <div className="mt-1 text-xs font-semibold text-[#F2F0EB] truncate">
+                  <div className="mt-1 text-xs font-semibold text-[#18181B] dark:text-[#F2F0EB] truncate">
                     {m.title}
                   </div>
 
-                  <div className="mt-1 flex items-center gap-1.5 text-[10px] font-mono-tech text-[#8D8981] whitespace-nowrap overflow-hidden tabular-nums">
-                    <Film className="w-3 h-3 shrink-0 text-[#8D8981]" />
+                  <div className="mt-1 flex items-center gap-1.5 text-[10px] font-mono-tech text-[#57534E] dark:text-[#8D8981] whitespace-nowrap overflow-hidden tabular-nums">
+                    <Film className="w-3 h-3 shrink-0 text-[#57534E] dark:text-[#8D8981]" />
                     <span>{m.shotCount} planos</span>
                     <span aria-hidden="true">·</span>
                     <span>{formatTimecodeSec(m.durationSec)}</span>
@@ -92,7 +92,7 @@ export function TimelineBar({
                   </div>
 
                   {m.continuityHighlight && (
-                    <p className="mt-1 text-[11px] text-[#9A968E] line-clamp-1">
+                    <p className="mt-1 text-[11px] text-[#57534E] dark:text-[#9A968E] line-clamp-1">
                       {m.continuityHighlight}
                     </p>
                   )}
@@ -101,7 +101,7 @@ export function TimelineBar({
                 {idx < milestones.length - 1 && (
                   <div
                     aria-hidden="true"
-                    className="w-4 h-px bg-white/15 shrink-0"
+                    className="w-4 h-px bg-[#D4CEC2] dark:bg-white/15 shrink-0"
                   />
                 )}
               </div>

@@ -44,9 +44,9 @@ export function ProjectSidebar({
   const filtered = filterProjects(projects, searchQuery);
 
   const sidebarContent = (
-    <div className="flex flex-col h-full bg-[#101015] border-r border-white/10">
-      <div className="p-4 border-b border-white/10 flex items-center justify-between gap-2">
-        <h2 className="font-display text-sm font-semibold text-[#F2F0EB]">
+    <div className="flex flex-col h-full bg-[#FAF8F4] dark:bg-[#101015] border-r border-[#E2DDD3] dark:border-white/10">
+      <div className="p-4 border-b border-[#E2DDD3] dark:border-white/10 flex items-center justify-between gap-2">
+        <h2 className="font-display text-sm font-semibold text-[#18181B] dark:text-[#F2F0EB]">
           Archivo de Producciones
         </h2>
         <div className="flex items-center gap-1">
@@ -54,7 +54,7 @@ export function ProjectSidebar({
             type="button"
             onClick={onOpenNewProject}
             aria-label="Crear nueva producción"
-            className="p-2 rounded-md text-[#9A968E] hover:text-[#F2F0EB] hover:bg-white/5 focus-visible:outline-2 focus-visible:outline-[#E5A93C]"
+            className="p-2 rounded-md text-[#57534E] dark:text-[#9A968E] hover:text-[#18181B] dark:hover:text-[#F2F0EB] hover:bg-black/5 dark:hover:bg-white/5 focus-visible:outline-2 focus-visible:outline-[#E5A93C]"
           >
             <FolderPlus className="w-4 h-4" />
           </button>
@@ -62,26 +62,26 @@ export function ProjectSidebar({
             type="button"
             onClick={onCloseMobile}
             aria-label="Cerrar panel de proyectos"
-            className="lg:hidden p-2 rounded-md text-[#9A968E] hover:text-[#F2F0EB] hover:bg-white/5"
+            className="lg:hidden p-2 rounded-md text-[#57534E] dark:text-[#9A968E] hover:text-[#18181B] dark:hover:text-[#F2F0EB] hover:bg-black/5 dark:hover:bg-white/5"
           >
             <X className="w-4 h-4" />
           </button>
         </div>
       </div>
 
-      <div className="p-3 border-b border-white/5">
+      <div className="p-3 border-b border-[#EBE7DF] dark:border-white/5">
         <label htmlFor="project-search" className="sr-only">
           Buscar producción
         </label>
         <div className="relative">
-          <Search className="w-3.5 h-3.5 text-[#7A7670] absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+          <Search className="w-3.5 h-3.5 text-[#78746C] dark:text-[#7A7670] absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
           <input
             id="project-search"
             type="search"
             value={searchQuery}
             onChange={(e) => onSearchChange(e.target.value)}
             placeholder="Buscar libro, audio o película..."
-            className="w-full bg-[#0B0B0E] border border-white/10 rounded-lg pl-8 pr-3 py-2 text-xs text-[#F2F0EB] placeholder:text-[#7A7670] focus:border-[#E5A93C] focus:outline-none"
+            className="w-full bg-[#FFFFFF] dark:bg-[#0B0B0E] border border-[#D6D1C7] dark:border-white/10 rounded-lg pl-8 pr-3 py-2 text-xs text-[#18181B] dark:text-[#F2F0EB] placeholder:text-[#78746C] dark:placeholder:text-[#7A7670] focus:border-[#E5A93C] focus:outline-none"
           />
         </div>
       </div>
@@ -89,7 +89,7 @@ export function ProjectSidebar({
       <div className="flex-1 overflow-y-auto p-3 space-y-1.5">
         {projects.length === 0 ? (
           <div className="py-10 px-3 text-center space-y-3">
-            <p className="text-xs text-[#9A968E] leading-relaxed">
+            <p className="text-xs text-[#57534E] dark:text-[#9A968E] leading-relaxed">
               Sin producciones aún. Inicia un proyecto nuevo desde cero.
             </p>
             <button
@@ -106,7 +106,7 @@ export function ProjectSidebar({
           </div>
         ) : filtered.length === 0 ? (
           <div className="py-10 px-3 text-center">
-            <p className="text-xs text-[#9A968E]">
+            <p className="text-xs text-[#57534E] dark:text-[#9A968E]">
               Ninguna producción coincide con &ldquo;{searchQuery}&rdquo;.
             </p>
           </div>
@@ -125,14 +125,14 @@ export function ProjectSidebar({
                 aria-current={isSelected ? 'true' : undefined}
                 className={`w-full text-left px-3 py-3 rounded-lg border transition-colors focus-visible:outline-2 focus-visible:outline-[#E5A93C] ${
                   isSelected
-                    ? 'bg-[#1A1A22] border-[#E5A93C]/50 text-[#F2F0EB]'
-                    : 'bg-transparent border-transparent hover:bg-white/[0.03] hover:border-white/10 text-[#C8C3BA]'
+                    ? 'bg-[#FFFFFF] dark:bg-[#1A1A22] border-amber-500/60 dark:border-[#E5A93C]/50 text-[#18181B] dark:text-[#F2F0EB] shadow-xs dark:shadow-none'
+                    : 'bg-transparent border-transparent hover:bg-black/[0.03] dark:hover:bg-white/[0.03] hover:border-[#E2DDD3] dark:hover:border-white/10 text-[#3F3F46] dark:text-[#C8C3BA]'
                 }`}
               >
                 <div className="text-sm font-semibold leading-snug line-clamp-2">
                   {project.title}
                 </div>
-                <div className="mt-1.5 flex items-center gap-1.5 text-[11px] text-[#8D8981] font-mono-tech whitespace-nowrap overflow-hidden tabular-nums">
+                <div className="mt-1.5 flex items-center gap-1.5 text-[11px] text-[#57534E] dark:text-[#8D8981] font-mono-tech whitespace-nowrap overflow-hidden tabular-nums">
                   <span className="truncate">
                     {project.defaultSourceType === 'book'
                       ? 'Libro'
@@ -151,27 +151,25 @@ export function ProjectSidebar({
         )}
       </div>
 
-      <div className="p-3 border-t border-white/10 space-y-2">
-        <button
-          type="button"
-          onClick={() => {
-            onOpenAdminLab();
-            onCloseMobile();
-          }}
-          className={`w-full flex items-center justify-between gap-2 px-3 py-2.5 rounded-lg border text-xs font-medium transition-colors whitespace-nowrap ${
-            isAdmin
-              ? 'border-[#E5A93C]/50 bg-[#1B1710] hover:bg-[#272116] text-[#F2F0EB]'
-              : 'border-white/10 bg-[#15151C] hover:bg-[#1C1C26] text-[#E6E2DA]'
-          }`}
-        >
-          <span className="inline-flex items-center gap-2">
-            <UserCog className="w-3.5 h-3.5 text-[#E5A93C]" />
-            <span>Laboratorio Admin</span>
-          </span>
-          <span className="font-mono-tech text-[10px] text-[#E5A93C]">
-            {isAdmin ? 'ACTIVO' : 'Agente'}
-          </span>
-        </button>
+      <div className="p-3 border-t border-[#E2DDD3] dark:border-white/10 space-y-2">
+        {isAdmin && (
+          <button
+            type="button"
+            onClick={() => {
+              onOpenAdminLab();
+              onCloseMobile();
+            }}
+            className="w-full flex items-center justify-between gap-2 px-3 py-2.5 rounded-lg border border-amber-500/50 dark:border-[#E5A93C]/50 bg-amber-50 hover:bg-amber-100 dark:bg-[#1B1710] dark:hover:bg-[#272116] text-xs font-medium text-[#18181B] dark:text-[#F2F0EB] transition-colors whitespace-nowrap"
+          >
+            <span className="inline-flex items-center gap-2">
+              <UserCog className="w-3.5 h-3.5 text-amber-700 dark:text-[#E5A93C]" />
+              <span>Laboratorio Admin</span>
+            </span>
+            <span className="font-mono-tech text-[10px] text-amber-800 dark:text-[#E5A93C]">
+              ACTIVO
+            </span>
+          </button>
+        )}
 
         <button
           type="button"
@@ -179,13 +177,13 @@ export function ProjectSidebar({
             onOpenLearning();
             onCloseMobile();
           }}
-          className="w-full flex items-center justify-between gap-2 px-3 py-2.5 rounded-lg border border-white/10 bg-[#15151C] hover:bg-[#1C1C26] text-xs font-medium text-[#E6E2DA] transition-colors whitespace-nowrap"
+          className="w-full flex items-center justify-between gap-2 px-3 py-2.5 rounded-lg border border-[#E2DDD3] dark:border-white/10 bg-[#FFFFFF] hover:bg-[#F1EFE9] dark:bg-[#15151C] dark:hover:bg-[#1C1C26] text-xs font-medium text-[#27272A] dark:text-[#E6E2DA] transition-colors whitespace-nowrap"
         >
           <span className="inline-flex items-center gap-2">
-            <Brain className="w-3.5 h-3.5 text-[#E5A93C]" />
+            <Brain className="w-3.5 h-3.5 text-amber-700 dark:text-[#E5A93C]" />
             <span>Autoaprendizaje</span>
           </span>
-          <span className="font-mono-tech text-[11px] text-[#8D8981] tabular-nums">
+          <span className="font-mono-tech text-[11px] text-[#57534E] dark:text-[#8D8981] tabular-nums">
             {lessonsCount}
           </span>
         </button>
@@ -196,9 +194,9 @@ export function ProjectSidebar({
             onOpenAgentBlueprint();
             onCloseMobile();
           }}
-          className="w-full flex items-center justify-center gap-2 px-3 py-2.5 rounded-lg border border-white/10 bg-[#15151C] hover:bg-[#1C1C26] text-xs font-medium text-[#E6E2DA] transition-colors whitespace-nowrap"
+          className="w-full flex items-center justify-center gap-2 px-3 py-2.5 rounded-lg border border-[#E2DDD3] dark:border-white/10 bg-[#FFFFFF] hover:bg-[#F1EFE9] dark:bg-[#15151C] dark:hover:bg-[#1C1C26] text-xs font-medium text-[#27272A] dark:text-[#E6E2DA] transition-colors whitespace-nowrap"
         >
-          <Layers className="w-3.5 h-3.5 text-[#E5A93C]" />
+          <Layers className="w-3.5 h-3.5 text-amber-700 dark:text-[#E5A93C]" />
           <span>Plantilla Agent Studio</span>
         </button>
 
@@ -208,9 +206,9 @@ export function ProjectSidebar({
             onOpenSettings();
             onCloseMobile();
           }}
-          className="w-full flex items-center justify-center gap-2 px-3 py-2.5 rounded-lg border border-white/10 bg-[#15151C] hover:bg-[#1C1C26] text-xs font-medium text-[#E6E2DA] transition-colors whitespace-nowrap"
+          className="w-full flex items-center justify-center gap-2 px-3 py-2.5 rounded-lg border border-[#E2DDD3] dark:border-white/10 bg-[#FFFFFF] hover:bg-[#F1EFE9] dark:bg-[#15151C] dark:hover:bg-[#1C1C26] text-xs font-medium text-[#27272A] dark:text-[#E6E2DA] transition-colors whitespace-nowrap"
         >
-          <Sliders className="w-3.5 h-3.5 text-[#E5A93C]" />
+          <Sliders className="w-3.5 h-3.5 text-amber-700 dark:text-[#E5A93C]" />
           <span>Configuración</span>
         </button>
 
@@ -220,13 +218,13 @@ export function ProjectSidebar({
             onOpenShortcuts();
             onCloseMobile();
           }}
-          className="w-full flex items-center justify-between gap-2 px-3 py-2 rounded-lg border border-white/10 bg-[#13131A] hover:bg-[#1C1C26] text-xs font-medium text-[#C8C3BA] transition-colors whitespace-nowrap"
+          className="w-full flex items-center justify-between gap-2 px-3 py-2 rounded-lg border border-[#E2DDD3] dark:border-white/10 bg-[#F5F3EE] hover:bg-[#ECE9E1] dark:bg-[#13131A] dark:hover:bg-[#1C1C26] text-xs font-medium text-[#3F3F46] dark:text-[#C8C3BA] transition-colors whitespace-nowrap"
         >
           <span className="inline-flex items-center gap-2">
-            <Keyboard className="w-3.5 h-3.5 text-[#E5A93C]" />
+            <Keyboard className="w-3.5 h-3.5 text-amber-700 dark:text-[#E5A93C]" />
             <span>Atajos de teclado</span>
           </span>
-          <kbd className="font-mono-tech text-[10px] text-[#8D8981]">?</kbd>
+          <kbd className="font-mono-tech text-[10px] text-[#57534E] dark:text-[#8D8981]">?</kbd>
         </button>
       </div>
     </div>
@@ -241,7 +239,7 @@ export function ProjectSidebar({
       {mobileOpen && (
         <div className="fixed inset-0 z-50 lg:hidden flex">
           <div
-            className="fixed inset-0 bg-black/75"
+            className="fixed inset-0 bg-black/50 dark:bg-black/75"
             onClick={onCloseMobile}
             aria-hidden="true"
           />

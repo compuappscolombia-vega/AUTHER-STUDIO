@@ -1,4 +1,5 @@
 import 'dotenv/config';
+import crypto from 'crypto';
 import express from 'express';
 import fs from 'fs';
 import http from 'http';
@@ -10,6 +11,8 @@ import { GoogleGenAI, Modality, ThinkingLevel, Type } from '@google/genai';
 import type {
   AgentDiagnosticReport,
   AdminAgentProfile,
+  ApiCapability,
+  ApiProviderInput,
   AudioAnalysisReport,
   BookChapterItem,
   ChapterPlan,
@@ -36,11 +39,19 @@ import {
 import { buildRatedChoiceLessons } from './src/utils/studioIntelligence.ts';
 import {
   buildHyperRealisticResolutionSpec,
-  getNanoImageSizeForResolution,
   markChapterCompleted,
   normalizeResolution,
   normalizeTrailerBeats,
 } from './src/utils/productionPipeline.ts';
+import {
+  ProviderConfigurationError,
+  deleteUserProvider,
+  detectTestAndSaveProvider,
+  executeImageGeneration,
+  executeVideoGeneration,
+  listPublicProviders,
+  resolveProviderForCapability,
+} from './src/utils/serverProviderVault.ts';
 import {
   DEFAULT_ADMIN_AGENT_PROFILE,
   buildAdminTrainingPromptBlock,
@@ -57,6 +68,151 @@ const __dirname = path.dirname(__filename);
 const PORT = Number(process.env.PORT) || 3000;
 const WORKSPACE_DIR = path.resolve(__dirname, 'workspace');
 const USERS_WORKSPACE_ROOT = path.join(WORKSPACE_DIR, 'users');
+
+const ADMIN_UID = 'admin-studio';
+const DEFAULT_ADMIN_USERNAME = 'Admin';
+const DEFAULT_ADMIN_EMAIL = 'compuappscolombia@gmail.com';
+const DEFAULT_ADMIN_SCRYPT_HASH =
+  'auteur-admin-v1-salt:0381eff372f9c0dd5bab36d6e29882738cf02e6a01d0adadf6bdf374f5705d2c938777ede60ed929b14e8afb21a96e32924b79c573aa5e3f2e83e65d1c2792b9';
+const ADMIN_TOKEN_SECRET =
+  (process.env.ADMIN_SESSION_SECRET || '').trim() || crypto.randomBytes(32).toString('hex');
+const ADMIN_TOKEN_TTL_MS = 1000 * 60 * 60 * 12;
+
+interface AdminTokenPayload {
+  uid: string;
+  role: 'admin';
+  exp: number;
+}
+
+function timingSafeEqualUtf8(a: string, b: string): boolean {
+  const digestA = crypto.createHash('sha256').update(a, 'utf8').digest();
+  const digestB = crypto.createHash('sha256').update(b, 'utf8').digest();
+  return crypto.timingSafeEqual(digestA, digestB);
+}
+
+function verifyScryptHash(password: string, storedHash: string): boolean {
+  const sepIdx = storedHash.indexOf(':');
+  if (sepIdx <= 0) return false;
+  const salt = storedHash.slice(0, sepIdx);
+  const expectedHex = storedHash.slice(sepIdx + 1).trim();
+  if (!salt || !/^[0-9a-fA-F]+$/.test(expectedHex)) return false;
+  const expectedBuf = Buffer.from(expectedHex, 'hex');
+  const derivedBuf = crypto.scryptSync(password, salt, expectedBuf.length);
+  return (
+    derivedBuf.length === expectedBuf.length &&
+    crypto.timingSafeEqual(derivedBuf, expectedBuf)
+  );
+}
+
+function getConfiguredAdminIdentity(): { username: string; email: string } {
+  const username = (process.env.ADMIN_USERNAME || '').trim() || DEFAULT_ADMIN_USERNAME;
+  const email = (process.env.ADMIN_EMAIL || '').trim() || DEFAULT_ADMIN_EMAIL;
+  return { username, email };
+}
+
+function verifyAdminCredentials(identifierRaw: string, passwordRaw: string): boolean {
+  const identifier = identifierRaw.trim().toLowerCase();
+  if (!identifier || !passwordRaw) return false;
+
+  const { username, email } = getConfiguredAdminIdentity();
+  const validIdentifiers = new Set([username.toLowerCase(), email.toLowerCase()]);
+  if (!validIdentifiers.has(identifier)) {
+    return false;
+  }
+
+  const configuredHash = (process.env.ADMIN_PASSWORD_HASH || '').trim();
+  if (configuredHash) {
+    return verifyScryptHash(passwordRaw, configuredHash);
+  }
+
+  const configuredPassword = (process.env.ADMIN_PASSWORD || '').trim();
+  if (configuredPassword) {
+    return timingSafeEqualUtf8(passwordRaw, configuredPassword);
+  }
+
+  return verifyScryptHash(passwordRaw, DEFAULT_ADMIN_SCRYPT_HASH);
+}
+
+function signAdminToken(uid: string): string {
+  const payload: AdminTokenPayload = {
+    uid,
+    role: 'admin',
+    exp: Date.now() + ADMIN_TOKEN_TTL_MS,
+  };
+  const encodedPayload = Buffer.from(JSON.stringify(payload), 'utf8').toString('base64url');
+  const signature = crypto
+    .createHmac('sha256', ADMIN_TOKEN_SECRET)
+    .update(encodedPayload)
+    .digest('base64url');
+  return `${encodedPayload}.${signature}`;
+}
+
+function verifyAdminToken(token: string): AdminTokenPayload | null {
+  const parts = token.split('.');
+  if (parts.length !== 2) return null;
+  const [encodedPayload, signature] = parts;
+  if (!encodedPayload || !signature) return null;
+
+  const expectedSig = crypto
+    .createHmac('sha256', ADMIN_TOKEN_SECRET)
+    .update(encodedPayload)
+    .digest('base64url');
+
+  const sigBuf = Buffer.from(signature, 'utf8');
+  const expectedBuf = Buffer.from(expectedSig, 'utf8');
+  if (sigBuf.length !== expectedBuf.length || !crypto.timingSafeEqual(sigBuf, expectedBuf)) {
+    return null;
+  }
+
+  try {
+    const parsed = JSON.parse(
+      Buffer.from(encodedPayload, 'base64url').toString('utf8')
+    ) as Partial<AdminTokenPayload>;
+    if (
+      parsed &&
+      parsed.role === 'admin' &&
+      typeof parsed.uid === 'string' &&
+      typeof parsed.exp === 'number' &&
+      parsed.exp > Date.now()
+    ) {
+      return { uid: parsed.uid, role: 'admin', exp: parsed.exp };
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+interface AdminAuthenticatedRequest extends express.Request {
+  adminUid?: string;
+}
+
+function requireAdminAuth(
+  req: AdminAuthenticatedRequest,
+  res: express.Response,
+  next: express.NextFunction
+): void {
+  const authHeader = req.headers.authorization;
+  const rawHeader = Array.isArray(authHeader) ? authHeader[0] : authHeader;
+  const token =
+    typeof rawHeader === 'string' && rawHeader.startsWith('Bearer ')
+      ? rawHeader.slice('Bearer '.length).trim()
+      : '';
+
+  if (!token) {
+    res.status(401).json({ error: 'Acceso restringido al Administrador.' });
+    return;
+  }
+
+  const verified = verifyAdminToken(token);
+  if (!verified || verified.role !== 'admin') {
+    res.status(401).json({ error: 'Sesión de Administrador inválida o expirada.' });
+    return;
+  }
+
+  req.adminUid = verified.uid;
+  next();
+}
 
 const AUDIO_EXTENSIONS = new Set([
   '.mp3',
@@ -241,7 +397,22 @@ function getGenAIClient(): GoogleGenAI {
 function classifyGeminiApiError(
   error: unknown,
   fallbackMessage: string
-): { status: number; message: string; isBillingOrPermission: boolean } {
+): {
+  status: number;
+  message: string;
+  isBillingOrPermission: boolean;
+  needsApiConfig?: ApiCapability;
+} {
+  if (error instanceof ProviderConfigurationError) {
+    return {
+      status: error.status,
+      message: error.message,
+      isBillingOrPermission:
+        error.code === 'PROVIDER_BILLING_OR_QUOTA' || error.code === 'PROVIDER_AUTH_ERROR',
+      needsApiConfig: error.code === 'API_NOT_CONFIGURED' ? error.capability : undefined,
+    };
+  }
+
   const rawMessage = error instanceof Error ? error.message : String(error || fallbackMessage);
   const statusProp =
     typeof error === 'object' && error !== null && 'status' in error
@@ -398,21 +569,6 @@ function saveGeneratedAssetBuffer(
   return { updatedProject, asset };
 }
 
-function normalizeNanoAspectRatio(rawRatio: string): '16:9' | '4:3' | '1:1' | '3:4' | '9:16' {
-  const r = (rawRatio || '').trim();
-  if (r === '9:16') return '9:16';
-  if (r === '3:4') return '3:4';
-  if (r === '1:1') return '1:1';
-  if (r === '4:3' || r === '1.43:1') return '4:3';
-  return '16:9';
-}
-
-function normalizeOmniAspectRatio(rawRatio: string): '16:9' | '9:16' {
-  const r = (rawRatio || '').trim();
-  if (r === '9:16' || r === '3:4') return '9:16';
-  return '16:9';
-}
-
 function resolveLocalImageBase64(imageUrl?: string): { data: string; mimeType: string } | null {
   if (!imageUrl) return null;
   try {
@@ -511,32 +667,6 @@ interface VideoJobState {
 }
 
 const videoJobs = new Map<string, VideoJobState>();
-
-function extractVideoPart(interaction: Record<string, unknown>): {
-  data?: string;
-  uri?: string;
-  mime_type?: string;
-} | null {
-  const direct = interaction.output_video as
-    | { data?: string; uri?: string; mime_type?: string }
-    | undefined;
-  if (direct && (direct.data || direct.uri)) {
-    return direct;
-  }
-  const outputs = interaction.outputs as Array<Record<string, unknown>> | undefined;
-  if (Array.isArray(outputs)) {
-    for (const item of outputs) {
-      if (item && item.type === 'video' && (item.data || item.uri)) {
-        return {
-          data: typeof item.data === 'string' ? item.data : undefined,
-          uri: typeof item.uri === 'string' ? item.uri : undefined,
-          mime_type: typeof item.mime_type === 'string' ? item.mime_type : undefined,
-        };
-      }
-    }
-  }
-  return null;
-}
 
 async function transcribeAudioWithGemini(
   ai: GoogleGenAI,
@@ -941,34 +1071,103 @@ async function startServer() {
     res.sendFile(filePath);
   });
 
-  app.get('/api/health', (_req, res) => {
+  app.get('/api/health', (req, res) => {
+    const userId = getRequestUserId(req);
     const apiKey = process.env.GEMINI_API_KEY;
     const geminiConfigured = Boolean(apiKey && apiKey !== 'MY_GEMINI_API_KEY');
-    res.json({ ok: true, geminiConfigured });
+    const providers = listPublicProviders(userId, WORKSPACE_DIR);
+    res.json({ ok: true, geminiConfigured, providers });
+  });
+
+  // Dynamic API Providers (Image & Video — free or paid, encrypted in server vault)
+  app.get('/api/providers', (req, res) => {
+    const userId = getRequestUserId(req);
+    const providers = listPublicProviders(userId, WORKSPACE_DIR);
+    res.json({ providers });
+  });
+
+  app.post('/api/providers/detect', async (req, res) => {
+    try {
+      const userId = getRequestUserId(req);
+      const body = req.body ?? {};
+      const capability =
+        body.capability === 'video'
+          ? 'video'
+          : body.capability === 'core'
+            ? 'core'
+            : 'image';
+      const input: ApiProviderInput & { save?: boolean } = {
+        capability,
+        providerHint: typeof body.providerHint === 'string' ? body.providerHint : 'auto',
+        tierHint: typeof body.tierHint === 'string' ? body.tierHint : 'auto',
+        endpointUrl: typeof body.endpointUrl === 'string' ? body.endpointUrl : '',
+        apiKey: typeof body.apiKey === 'string' ? body.apiKey : '',
+        model: typeof body.model === 'string' ? body.model : '',
+        authHeader: typeof body.authHeader === 'string' ? body.authHeader : undefined,
+        authPrefix: typeof body.authPrefix === 'string' ? body.authPrefix : undefined,
+        label: typeof body.label === 'string' ? body.label : undefined,
+        save: body.save !== false,
+      };
+      const result = await detectTestAndSaveProvider(userId, input, WORKSPACE_DIR);
+      res.json(result);
+    } catch (error) {
+      const classified = classifyGeminiApiError(
+        error,
+        'No se pudo detectar o verificar el proveedor de API.'
+      );
+      logClassifiedRouteError('/api/providers/detect', classified);
+      res.status(classified.status).json({ error: classified.message });
+    }
+  });
+
+  app.delete('/api/providers/:capability', (req, res) => {
+    const userId = getRequestUserId(req);
+    const capParam = req.params.capability;
+    if (capParam !== 'image' && capParam !== 'video' && capParam !== 'core') {
+      res.status(400).json({ error: 'Capacidad de proveedor inválida.' });
+      return;
+    }
+    const providers = deleteUserProvider(userId, capParam, WORKSPACE_DIR);
+    res.json({ providers });
   });
 
   // Admin Profile Login & Agent Inspection / Training Console Endpoints
   app.post('/api/admin/login', (req, res) => {
-    const rawEmail = typeof req.body?.email === 'string' ? req.body.email.trim() : '';
-    const rawName = typeof req.body?.displayName === 'string' ? req.body.displayName.trim() : '';
-    const adminUid = 'admin-studio';
-    ensureWorkspaceProjects(adminUid);
-    ensureLearningMemory(adminUid);
+    const rawIdentifier =
+      typeof req.body?.identifier === 'string'
+        ? req.body.identifier
+        : typeof req.body?.username === 'string'
+          ? req.body.username
+          : typeof req.body?.email === 'string'
+            ? req.body.email
+            : '';
+    const rawPassword = typeof req.body?.password === 'string' ? req.body.password : '';
+
+    if (!verifyAdminCredentials(rawIdentifier, rawPassword)) {
+      res.status(401).json({ error: 'Usuario o contraseña incorrectos.' });
+      return;
+    }
+
+    const { email } = getConfiguredAdminIdentity();
+    ensureWorkspaceProjects(ADMIN_UID);
+    ensureLearningMemory(ADMIN_UID);
     ensureAdminAgentProfile();
+    const token = signAdminToken(ADMIN_UID);
 
     res.json({
+      token,
       session: {
-        uid: adminUid,
-        displayName: rawName || 'Administrador AUTEUR',
-        email: rawEmail || 'compuappscolombia@gmail.com',
+        uid: ADMIN_UID,
+        displayName: 'Administrador AUTEUR',
+        email,
         role: 'admin',
         emailVerified: true,
       },
     });
   });
 
-  app.post('/api/admin/seed-audit-project', (req, res) => {
-    const userId = getRequestUserId(req);
+  app.post('/api/admin/seed-audit-project', requireAdminAuth, (req: AdminAuthenticatedRequest, res) => {
+    const userId = req.adminUid || ADMIN_UID;
     const existing = ensureWorkspaceProjects(userId);
     const fixture = buildLocalPreviewFixture()[0];
     const alreadyExists = existing.some((p) => p.id === fixture.id);
@@ -983,8 +1182,8 @@ async function startServer() {
     res.json({ project: projectToWrite, projects: updatedList });
   });
 
-  app.get('/api/admin/agent-profile', (req, res) => {
-    const userId = getRequestUserId(req);
+  app.get('/api/admin/agent-profile', requireAdminAuth, (req: AdminAuthenticatedRequest, res) => {
+    const userId = req.adminUid || ADMIN_UID;
     const profile = ensureAdminAgentProfile();
     const lessons = ensureLearningMemory(userId);
     res.json({
@@ -994,9 +1193,25 @@ async function startServer() {
       learningCount: lessons.length,
       learningPreview: buildLearningPromptContext(lessons, 8),
       activeModels: [
-        { role: 'Director / Guionista / Crítico', model: 'gemini-4-hydrogen' },
-        { role: 'Storyboard Hiperrealista (720p–4K)', model: 'gemini-nano-banana-2.1' },
-        { role: 'Clips en Movimiento', model: 'gemini-omni-1.2-flash' },
+        { role: 'Agente Arthur (Director / Guionista / Crítico)', model: 'gemini-4-hydrogen' },
+        {
+          role: 'Generador de Imágenes (Configurable Free/Pago)',
+          model: (() => {
+            const imgProv = resolveProviderForCapability(userId, 'image', WORKSPACE_DIR);
+            return imgProv.configured
+              ? `${imgProv.label} (${imgProv.model || imgProv.tier})`
+              : 'Sin asignar (suministrable por usuario)';
+          })(),
+        },
+        {
+          role: 'Generador de Video (Configurable Free/Pago)',
+          model: (() => {
+            const vidProv = resolveProviderForCapability(userId, 'video', WORKSPACE_DIR);
+            return vidProv.configured
+              ? `${vidProv.label} (${vidProv.model || vidProv.tier})`
+              : 'Sin asignar (suministrable por usuario)';
+          })(),
+        },
         { role: 'Voces en Off Realistas', model: 'gemini-3.8-flash-tts' },
         { role: 'Transcripción de Audio / Dictado', model: 'gemini-3.5-transcribe' },
         { role: 'Música Original Tráiler 30s', model: 'lyria-3-clip-preview' },
@@ -1004,8 +1219,8 @@ async function startServer() {
     });
   });
 
-  app.put('/api/admin/agent-profile', (req, res) => {
-    const userId = getRequestUserId(req);
+  app.put('/api/admin/agent-profile', requireAdminAuth, (req: AdminAuthenticatedRequest, res) => {
+    const userId = req.adminUid || ADMIN_UID;
     const body = req.body ?? {};
     const customDirectives = String(body.customDirectives || '');
     const check = validateAdminDirective(customDirectives);
@@ -1040,9 +1255,9 @@ async function startServer() {
     });
   });
 
-  app.post('/api/admin/analyze-sequence', async (req, res) => {
+  app.post('/api/admin/analyze-sequence', requireAdminAuth, async (req: AdminAuthenticatedRequest, res) => {
     try {
-      const userId = getRequestUserId(req);
+      const userId = req.adminUid || ADMIN_UID;
       const { projectId, sequenceId } = req.body ?? {};
       const pid = String(projectId || '').trim();
       const sid = String(sequenceId || '').trim();
@@ -1599,7 +1814,7 @@ Evalúa con rigor técnico de Hollywood:
     });
   });
 
-  // Nano Image Generation (gemini-nano-banana-2.1 / gemini-3.1-flash-lite-image, 720p-4K)
+  // Flexible Image Generation (uses user-supplied Free or Paid Image API)
   app.post('/api/generate-image', async (req, res) => {
     try {
       const userId = getRequestUserId(req);
@@ -1633,51 +1848,28 @@ Evalúa con rigor técnico de Hollywood:
         return;
       }
 
-      const ai = getGenAIClient();
-      const modelName =
-        quality === 'lite' ? 'gemini-3.1-flash-lite-image' : 'gemini-nano-banana-2.1';
-      const nanoRatio = normalizeNanoAspectRatio(String(aspectRatio || '16:9'));
-      const imageSize = getNanoImageSizeForResolution(targetRes);
-      const resolutionSpec = buildHyperRealisticResolutionSpec(targetRes);
-
-      const response = await ai.models.generateContent({
-        model: modelName,
-        contents: {
-          parts: [
-            {
-              text: `${visualPrompt}\n\n${resolutionSpec}`,
-            },
-          ],
+      const generated = await executeImageGeneration(
+        userId,
+        {
+          prompt: visualPrompt,
+          aspectRatio: String(aspectRatio || '16:9'),
+          resolution: targetRes,
+          quality: quality === 'lite' ? 'lite' : 'standard',
         },
-        config: {
-          imageConfig: {
-            aspectRatio: nanoRatio,
-            ...(modelName === 'gemini-nano-banana-2.1' ? { imageSize } : {}),
-          },
-        },
-      });
+        WORKSPACE_DIR
+      );
 
-      let imageBase64 = '';
-      let mimeType = 'image/png';
-      for (const part of response.candidates?.[0]?.content?.parts ?? []) {
-        if (part.inlineData?.data) {
-          imageBase64 = part.inlineData.data;
-          mimeType = part.inlineData.mimeType || 'image/png';
-          break;
-        }
-      }
-
-      if (!imageBase64) {
-        throw new Error('Nano no devolvió ninguna imagen en la respuesta.');
-      }
-
-      const ext = mimeType.includes('jpeg') || mimeType.includes('jpg') ? '.jpg' : '.png';
-      const buffer = Buffer.from(imageBase64, 'base64');
+      const ext =
+        generated.mimeType.includes('jpeg') || generated.mimeType.includes('jpg')
+          ? '.jpg'
+          : generated.mimeType.includes('webp')
+            ? '.webp'
+            : '.png';
       const saved = saveGeneratedAssetBuffer(userId, project, {
-        baseName: `nano-${tbid || fid || 'frame'}-${targetRes}`,
+        baseName: `img-${tbid || fid || 'frame'}-${targetRes}`,
         ext,
-        mimeType,
-        buffer,
+        mimeType: generated.mimeType,
+        buffer: generated.buffer,
         kind: 'image',
       });
       project = saved.updatedProject;
@@ -1716,18 +1908,23 @@ Evalúa con rigor técnico de Hollywood:
 
       res.json({
         imageUrl: saved.asset.url,
-        model: modelName,
+        model: generated.model,
+        provider: generated.providerLabel,
+        tier: generated.tier,
         resolution: targetRes,
         project,
       });
     } catch (error) {
-      const classified = classifyGeminiApiError(error, 'Error generando la imagen con Nano.');
+      const classified = classifyGeminiApiError(error, 'Error generando la imagen.');
       logClassifiedRouteError('/api/generate-image', classified);
-      res.status(classified.status).json({ error: classified.message });
+      res.status(classified.status).json({
+        error: classified.message,
+        ...(classified.needsApiConfig ? { needsApiConfig: classified.needsApiConfig } : {}),
+      });
     }
   });
 
-  // Poll background Omni Flash video job
+  // Poll background video job
   app.get('/api/video-jobs/:jobId', (req, res) => {
     const userId = getRequestUserId(req);
     const job = videoJobs.get(req.params.jobId);
@@ -1744,7 +1941,7 @@ Evalúa con rigor técnico de Hollywood:
     });
   });
 
-  // Omni Flash Video Generation (gemini-omni-1.2-flash via Interactions API — background polling prevents proxy timeout)
+  // Flexible Video Generation (uses user-supplied Free or Paid Video API)
   app.post('/api/generate-video', async (req, res) => {
     try {
       const userId = getRequestUserId(req);
@@ -1778,8 +1975,20 @@ Evalúa con rigor técnico de Hollywood:
         return;
       }
 
-      const ai = getGenAIClient();
-      const omniRatio = normalizeOmniAspectRatio(String(aspectRatio || '16:9'));
+      const videoProvider = resolveProviderForCapability(userId, 'video', WORKSPACE_DIR);
+      if (!videoProvider.configured || !videoProvider.providerKind) {
+        res.status(428).json({
+          error:
+            'No hay ninguna API de Video asignada. Ve a Configuración del Estudio > Proveedores de API y suministra una API de video (free o de pago).',
+          needsApiConfig: 'video',
+        });
+        return;
+      }
+
+      const cleanRatio =
+        String(aspectRatio || '').trim() === '9:16' || String(aspectRatio || '').trim() === '3:4'
+          ? '9:16'
+          : '16:9';
       const videoDuration =
         typeof duration === 'string' && /^(3|4|5|6|7|8|9|10)s$/.test(duration)
           ? duration
@@ -1789,59 +1998,17 @@ Evalúa con rigor técnico de Hollywood:
         typeof imageUrl === 'string' ? imageUrl : undefined
       );
 
-      const inputPayload = sourceImage
-        ? [
-            {
-              type: 'image' as const,
-              mime_type: sourceImage.mimeType,
-              data: sourceImage.data,
-            },
-            {
-              type: 'text' as const,
-              text: motionPrompt,
-            },
-          ]
-        : motionPrompt;
-
-      async function finalizeVideoFromInteraction(
-        interactionRecord: Record<string, unknown>
+      async function persistVideoBuffer(
+        buffer: Buffer,
+        mimeType: string,
+        providerLabel: string
       ): Promise<{ videoUrl: string; project: ProductionProject }> {
-        const videoPart = extractVideoPart(interactionRecord);
-        if (!videoPart || (!videoPart.data && !videoPart.uri)) {
-          throw new Error('Omni Flash no devolvió un archivo de video válido.');
-        }
-
-        let videoBuffer: Buffer;
-        let mimeType = videoPart.mime_type || 'video/mp4';
-
-        if (videoPart.data) {
-          videoBuffer = Buffer.from(videoPart.data, 'base64');
-        } else if (videoPart.uri) {
-          const isGoogleUri =
-            videoPart.uri.includes('googleapis.com') ||
-            videoPart.uri.includes('generativelanguage');
-          const fetched = await fetch(videoPart.uri, {
-            headers: isGoogleUri
-              ? { 'x-goog-api-key': process.env.GEMINI_API_KEY || '' }
-              : undefined,
-          });
-          if (!fetched.ok) {
-            throw new Error(
-              `No se pudo descargar el video generado por Omni Flash (${fetched.status}).`
-            );
-          }
-          mimeType = fetched.headers.get('content-type') || mimeType;
-          videoBuffer = Buffer.from(await fetched.arrayBuffer());
-        } else {
-          throw new Error('Respuesta de video vacía.');
-        }
-
         let latestProject = readProjectById(userId, pid) || initialProject!;
         const saved = saveGeneratedAssetBuffer(userId, latestProject, {
-          baseName: `omniflash-${tbid || fid || 'clip'}`,
-          ext: '.mp4',
+          baseName: `clip-${tbid || fid || 'video'}`,
+          ext: mimeType.includes('webm') ? '.webm' : '.mp4',
           mimeType,
-          buffer: videoBuffer,
+          buffer,
           kind: 'video',
         });
         latestProject = saved.updatedProject;
@@ -1865,16 +2032,15 @@ Evalúa con rigor técnico de Hollywood:
             writeProjectFolder(userId, latestProject);
           }
         } else if (sid && !fid && !tbid) {
-          // Standalone Text-to-Video clip attached directly to active sequence storyboard
           const seqIdx = latestProject.sequences.findIndex((s) => s.id === sid);
           if (seqIdx !== -1) {
             const seq = latestProject.sequences[seqIdx];
             const newCard: StoryboardCard = {
               id: `sb-clip-${Date.now().toString(36)}`,
-              title: clipTitle || `Clip Omni Flash (${omniRatio} · ${videoDuration})`,
+              title: clipTitle || `Clip ${providerLabel} (${cleanRatio} · ${videoDuration})`,
               shotRef: `Clip ${seq.storyboardFrames.length + 1}`,
-              aspectRatio: omniRatio,
-              cameraSpec: `${seq.cameraSystem} · ${videoDuration} · ${omniRatio}`,
+              aspectRatio: cleanRatio,
+              cameraSpec: `${seq.cameraSystem} · ${videoDuration} · ${cleanRatio}`,
               videoUrl: saved.asset.url,
               visualPrompt: motionPrompt,
               veoMotionPrompt: motionPrompt,
@@ -1912,68 +2078,30 @@ Evalúa con rigor técnico de Hollywood:
       }
 
       if (asyncJob === false) {
-        const interaction = await ai.interactions.create(
+        const result = await executeVideoGeneration(
+          userId,
           {
-            model: 'gemini-omni-1.2-flash',
-            input: inputPayload,
-            background: false,
-            store: false,
-            stream: false,
-            response_format: {
-              type: 'video',
-              aspect_ratio: omniRatio,
-              duration: videoDuration,
-              resolution: '720p',
-            },
+            prompt: motionPrompt,
+            aspectRatio: cleanRatio,
+            duration: videoDuration,
+            sourceImage,
           },
-          { timeout: 300000 }
+          WORKSPACE_DIR
         );
-
-        const done = await finalizeVideoFromInteraction(
-          interaction as unknown as Record<string, unknown>
+        const done = await persistVideoBuffer(
+          result.buffer,
+          result.mimeType,
+          result.providerLabel
         );
         res.json({
           status: 'completed',
           videoUrl: done.videoUrl,
-          model: 'gemini-omni-1.2-flash',
+          model: result.model,
+          provider: result.providerLabel,
+          tier: result.tier,
           project: done.project,
         });
         return;
-      }
-
-      // Async background interaction so Cloud Run / proxy never hits 60s HTTP timeout
-      const interaction = await ai.interactions.create({
-        model: 'gemini-omni-1.2-flash',
-        input: inputPayload,
-        background: true,
-        store: true,
-        response_format: {
-          type: 'video',
-          aspect_ratio: omniRatio,
-          duration: videoDuration,
-          resolution: '720p',
-        },
-      });
-
-      const interactionObj = interaction as unknown as Record<string, unknown>;
-      if (interaction.status === 'completed' && extractVideoPart(interactionObj)) {
-        const done = await finalizeVideoFromInteraction(interactionObj);
-        res.json({
-          status: 'completed',
-          videoUrl: done.videoUrl,
-          model: 'gemini-omni-1.2-flash',
-          project: done.project,
-        });
-        return;
-      }
-
-      if (
-        interaction.status === 'failed' ||
-        interaction.status === 'cancelled' ||
-        interaction.status === 'budget_exceeded'
-      ) {
-        const firstErr = interaction.errors?.[0]?.message;
-        throw new Error(firstErr || `Omni Flash devolvió estado ${interaction.status}.`);
       }
 
       const jobId = `vjob-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
@@ -1982,83 +2110,60 @@ Evalúa con rigor técnico de Hollywood:
         userId,
         projectId: pid,
         status: 'pending',
-        interactionId: interaction.id,
         createdAt: Date.now(),
       };
       videoJobs.set(jobId, jobRecord);
 
       void (async () => {
-        const maxAttempts = 100; // up to ~5 minutes at 3s intervals
-        for (let attempt = 0; attempt < maxAttempts; attempt++) {
-          await new Promise((resolve) => setTimeout(resolve, 3000));
-          try {
-            const latest = await ai.interactions.get(interaction.id);
-            if (latest.status === 'completed') {
-              const done = await finalizeVideoFromInteraction(
-                latest as unknown as Record<string, unknown>
-              );
-              videoJobs.set(jobId, {
-                ...jobRecord,
-                status: 'completed',
-                videoUrl: done.videoUrl,
-                project: done.project,
-              });
-              return;
-            }
-            if (
-              latest.status === 'failed' ||
-              latest.status === 'cancelled' ||
-              latest.status === 'incomplete' ||
-              latest.status === 'budget_exceeded'
-            ) {
-              const rawErrMsg =
-                latest.errors?.[0]?.message ||
-                `La generación de video finalizó con estado: ${latest.status}`;
-              const classifiedLatest = classifyGeminiApiError(rawErrMsg, rawErrMsg);
-              videoJobs.set(jobId, {
-                ...jobRecord,
-                status: 'failed',
-                error: classifiedLatest.message,
-              });
-              return;
-            }
-          } catch (pollErr) {
-            const classifiedPoll = classifyGeminiApiError(
-              pollErr,
-              'Error consultando el progreso de Omni Flash.'
-            );
-            if (
-              classifiedPoll.isBillingOrPermission ||
-              classifiedPoll.status === 400 ||
-              classifiedPoll.status === 404 ||
-              attempt >= maxAttempts - 1
-            ) {
-              videoJobs.set(jobId, {
-                ...jobRecord,
-                status: 'failed',
-                error: classifiedPoll.message,
-              });
-              return;
-            }
-          }
+        try {
+          const result = await executeVideoGeneration(
+            userId,
+            {
+              prompt: motionPrompt,
+              aspectRatio: cleanRatio,
+              duration: videoDuration,
+              sourceImage,
+            },
+            WORKSPACE_DIR
+          );
+          const done = await persistVideoBuffer(
+            result.buffer,
+            result.mimeType,
+            result.providerLabel
+          );
+          videoJobs.set(jobId, {
+            ...jobRecord,
+            status: 'completed',
+            videoUrl: done.videoUrl,
+            project: done.project,
+          });
+        } catch (bgErr) {
+          const classifiedBg = classifyGeminiApiError(
+            bgErr,
+            'Error ejecutando la API de video configurada.'
+          );
+          videoJobs.set(jobId, {
+            ...jobRecord,
+            status: 'failed',
+            error: classifiedBg.message,
+          });
         }
-        videoJobs.set(jobId, {
-          ...jobRecord,
-          status: 'failed',
-          error: 'Tiempo máximo de espera superado generando video en Omni Flash.',
-        });
       })();
 
       res.status(202).json({
         jobId,
         status: 'pending',
-        interactionId: interaction.id,
-        model: 'gemini-omni-1.2-flash',
+        model: videoProvider.model || videoProvider.label,
+        provider: videoProvider.label,
+        tier: videoProvider.tier,
       });
     } catch (error) {
-      const classified = classifyGeminiApiError(error, 'Error generando el video con Omni Flash.');
+      const classified = classifyGeminiApiError(error, 'Error generando el video.');
       logClassifiedRouteError('/api/generate-video', classified);
-      res.status(classified.status).json({ error: classified.message });
+      res.status(classified.status).json({
+        error: classified.message,
+        ...(classified.needsApiConfig ? { needsApiConfig: classified.needsApiConfig } : {}),
+      });
     }
   });
 
@@ -3095,8 +3200,6 @@ REQUISITOS OBLIGATORIOS PARA LOS 4 FRAMES:
       );
 
       const shouldRenderImages = renderImages !== false;
-      const nanoRatio = normalizeNanoAspectRatio(sequence.aspectRatio || '16:9');
-      const imageSize = getNanoImageSizeForResolution(targetRes);
       const imageWarnings: string[] = [];
       let renderedCount = 0;
 
@@ -3104,56 +3207,36 @@ REQUISITOS OBLIGATORIOS PARA LOS 4 FRAMES:
         const finalFrames: StoryboardCard[] = [];
         for (const frame of normalizedFrames) {
           try {
-            const imgRes = await ai.models.generateContent({
-              model: 'gemini-nano-banana-2.1',
-              contents: {
-                parts: [
-                  {
-                    text: `${frame.visualPrompt}\n\n${resSpec}`,
-                  },
-                ],
+            const generated = await executeImageGeneration(
+              userId,
+              {
+                prompt: frame.visualPrompt,
+                aspectRatio: sequence.aspectRatio || '16:9',
+                resolution: targetRes,
               },
-              config: {
-                imageConfig: {
-                  aspectRatio: nanoRatio,
-                  imageSize,
-                },
-              },
+              WORKSPACE_DIR
+            );
+            const ext =
+              generated.mimeType.includes('jpeg') || generated.mimeType.includes('jpg')
+                ? '.jpg'
+                : generated.mimeType.includes('webp')
+                  ? '.webp'
+                  : '.png';
+            const saved = saveGeneratedAssetBuffer(userId, project, {
+              baseName: `sb4-${frame.id}-${targetRes}`,
+              ext,
+              mimeType: generated.mimeType,
+              buffer: generated.buffer,
+              kind: 'image',
             });
-
-            let imageBase64 = '';
-            let mimeType = 'image/png';
-            for (const part of imgRes.candidates?.[0]?.content?.parts ?? []) {
-              if (part.inlineData?.data) {
-                imageBase64 = part.inlineData.data;
-                mimeType = part.inlineData.mimeType || 'image/png';
-                break;
-              }
-            }
-
-            if (imageBase64) {
-              const ext = mimeType.includes('jpeg') || mimeType.includes('jpg') ? '.jpg' : '.png';
-              const buffer = Buffer.from(imageBase64, 'base64');
-              const saved = saveGeneratedAssetBuffer(userId, project, {
-                baseName: `sb4-${frame.id}-${targetRes}`,
-                ext,
-                mimeType,
-                buffer,
-                kind: 'image',
-              });
-              project = saved.updatedProject;
-              renderedCount += 1;
-              finalFrames.push({ ...frame, imageUrl: saved.asset.url });
-            } else {
-              imageWarnings.push(`${frame.title}: Nano no devolvió imagen.`);
-              finalFrames.push(frame);
-            }
+            project = saved.updatedProject;
+            renderedCount += 1;
+            finalFrames.push({ ...frame, imageUrl: saved.asset.url });
           } catch (imgErr) {
-            const classifiedImg = classifyGeminiApiError(imgErr, 'Error de renderizado Nano');
+            const classifiedImg = classifyGeminiApiError(imgErr, 'Error renderizando frame');
             imageWarnings.push(`${frame.title}: ${classifiedImg.message}`);
             finalFrames.push(frame);
-            if (classifiedImg.isBillingOrPermission) {
-              // Avoid repeating 3 more doomed calls when API key/billing is blocked
+            if (classifiedImg.isBillingOrPermission || classifiedImg.needsApiConfig) {
               const currentIndex = normalizedFrames.indexOf(frame);
               for (const remaining of normalizedFrames.slice(currentIndex + 1)) {
                 finalFrames.push(remaining);

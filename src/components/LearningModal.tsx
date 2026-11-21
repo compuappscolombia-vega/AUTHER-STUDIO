@@ -91,20 +91,20 @@ export function LearningModal({
       role="dialog"
       aria-modal="true"
       aria-labelledby="learning-modal-title"
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 dark:bg-black/80 p-4"
     >
-      <div className="w-full max-w-2xl max-h-[88vh] flex flex-col rounded-xl border border-white/12 bg-[#121218] overflow-hidden">
-        <div className="px-6 py-4 border-b border-white/10 flex items-center justify-between shrink-0">
+      <div className="w-full max-w-2xl max-h-[88vh] flex flex-col rounded-xl border border-[#DCD6CA] dark:border-white/12 bg-[#FFFFFF] dark:bg-[#121218] overflow-hidden shadow-2xl">
+        <div className="px-6 py-4 border-b border-[#E2DDD3] dark:border-white/10 flex items-center justify-between shrink-0">
           <div className="flex items-center gap-2.5">
-            <Brain className="w-5 h-5 text-[#E5A93C]" />
+            <Brain className="w-5 h-5 text-amber-600 dark:text-[#E5A93C]" />
             <div>
               <h2
                 id="learning-modal-title"
-                className="font-display text-lg font-semibold text-[#F2F0EB]"
+                className="font-display text-lg font-semibold text-[#18181B] dark:text-[#F2F0EB]"
               >
                 Autoaprendizaje y Mejora Continua
               </h2>
-              <p className="text-xs text-[#8D8981] mt-0.5">
+              <p className="text-xs text-[#57534E] dark:text-[#8D8981] mt-0.5">
                 Las lecciones mejor valoradas y las versiones finales aprobadas entrenan al productor para próximas secuencias.
               </p>
             </div>
@@ -113,7 +113,7 @@ export function LearningModal({
             type="button"
             onClick={onClose}
             aria-label="Cerrar panel de aprendizaje"
-            className="p-2 rounded-lg text-[#9A968E] hover:text-[#F2F0EB] hover:bg-white/5"
+            className="p-2 rounded-lg text-[#57534E] dark:text-[#9A968E] hover:text-[#18181B] dark:hover:text-[#F2F0EB] hover:bg-black/5 dark:hover:bg-white/5"
           >
             <X className="w-4 h-4" />
           </button>
@@ -122,9 +122,9 @@ export function LearningModal({
         <div className="flex-1 overflow-y-auto p-6 space-y-6">
           <form
             onSubmit={handleSubmit}
-            className="p-4 rounded-xl border border-white/10 bg-[#0B0B0E] space-y-3"
+            className="p-4 rounded-xl border border-[#DCD6CA] dark:border-white/10 bg-[#FAF8F4] dark:bg-[#0B0B0E] space-y-3"
           >
-            <div className="text-xs font-semibold text-[#F2F0EB]">
+            <div className="text-xs font-semibold text-[#18181B] dark:text-[#F2F0EB]">
               Registrar nueva regla o mejora de dirección
             </div>
 
@@ -132,7 +132,7 @@ export function LearningModal({
               <div>
                 <label
                   htmlFor="learning-category"
-                  className="block text-[11px] font-medium text-[#9A968E] mb-1"
+                  className="block text-[11px] font-medium text-[#57534E] dark:text-[#9A968E] mb-1"
                 >
                   Disciplina cinematográfica
                 </label>
@@ -140,7 +140,7 @@ export function LearningModal({
                   id="learning-category"
                   value={category}
                   onChange={(e) => setCategory(e.target.value as LearningCategory)}
-                  className="w-full rounded-lg border border-white/12 bg-[#14141B] px-3 py-2 text-xs text-[#F2F0EB] focus:border-[#E5A93C] focus:outline-none"
+                  className="w-full rounded-lg border border-[#D6D1C7] dark:border-white/12 bg-[#FFFFFF] dark:bg-[#14141B] px-3 py-2 text-xs text-[#18181B] dark:text-[#F2F0EB] focus:border-[#E5A93C] focus:outline-none"
                 >
                   {CATEGORIES.map((cat) => (
                     <option key={cat} value={cat}>
@@ -153,7 +153,7 @@ export function LearningModal({
               <div>
                 <label
                   htmlFor="learning-rating"
-                  className="block text-[11px] font-medium text-[#9A968E] mb-1"
+                  className="block text-[11px] font-medium text-[#57534E] dark:text-[#9A968E] mb-1"
                 >
                   Prioridad / Calificación (1–5)
                 </label>
@@ -161,7 +161,7 @@ export function LearningModal({
                   id="learning-rating"
                   value={rating}
                   onChange={(e) => setRating(Number(e.target.value))}
-                  className="w-full rounded-lg border border-white/12 bg-[#14141B] px-3 py-2 text-xs text-[#F2F0EB] font-mono-tech focus:border-[#E5A93C] focus:outline-none"
+                  className="w-full rounded-lg border border-[#D6D1C7] dark:border-white/12 bg-[#FFFFFF] dark:bg-[#14141B] px-3 py-2 text-xs text-[#18181B] dark:text-[#F2F0EB] font-mono-tech focus:border-[#E5A93C] focus:outline-none"
                 >
                   <option value={5}>5 — Criterio maestro obligatorio</option>
                   <option value={4}>4 — Muy recomendado</option>
@@ -175,7 +175,7 @@ export function LearningModal({
             <div>
               <label
                 htmlFor="learning-insight"
-                className="block text-[11px] font-medium text-[#9A968E] mb-1"
+                className="block text-[11px] font-medium text-[#57534E] dark:text-[#9A968E] mb-1"
               >
                 Aprendizaje técnico o corrección para el productor
               </label>
@@ -185,14 +185,14 @@ export function LearningModal({
                 value={insight}
                 onChange={(e) => setInsight(e.target.value)}
                 placeholder="Ej: En diálogos nocturnos con lluvia, usar contraste 6:1 a 5600K y reducir diálogos expositivos en favor de planos detalle."
-                className="w-full rounded-lg border border-white/12 bg-[#14141B] p-2.5 text-xs text-[#F2F0EB] placeholder:text-[#6E6A63] focus:border-[#E5A93C] focus:outline-none"
+                className="w-full rounded-lg border border-[#D6D1C7] dark:border-white/12 bg-[#FFFFFF] dark:bg-[#14141B] p-2.5 text-xs text-[#18181B] dark:text-[#F2F0EB] placeholder:text-[#78746C] dark:placeholder:text-[#6E6A63] focus:border-[#E5A93C] focus:outline-none"
               />
             </div>
 
             {error && (
               <div
                 role="alert"
-                className="rounded-lg border border-[#EF4444]/35 bg-[#3B1515]/50 px-3 py-2 text-xs text-[#FCA5A5]"
+                className="rounded-lg border border-red-300 dark:border-[#EF4444]/35 bg-red-50 dark:bg-[#3B1515]/50 px-3 py-2 text-xs text-red-700 dark:text-[#FCA5A5]"
               >
                 {error}
               </div>
@@ -211,13 +211,13 @@ export function LearningModal({
           </form>
 
           <div className="space-y-3">
-            <div className="flex items-center justify-between text-xs text-[#9A968E]">
+            <div className="flex items-center justify-between text-xs text-[#57534E] dark:text-[#9A968E]">
               <span>Memoria activa inyectada en nuevas producciones</span>
               <span className="font-mono-tech tabular-nums">{lessons.length} lecciones</span>
             </div>
 
             {lessons.length === 0 ? (
-              <p className="text-xs text-[#8D8981] py-6 text-center">
+              <p className="text-xs text-[#57534E] dark:text-[#8D8981] py-6 text-center">
                 Aún no hay lecciones registradas. Aprueba una Versión Final o añade un criterio arriba.
               </p>
             ) : (
@@ -225,35 +225,35 @@ export function LearningModal({
                 {lessons.map((lesson) => (
                   <div
                     key={lesson.id}
-                    className="p-3.5 rounded-lg border border-white/10 bg-[#17171F] flex items-start justify-between gap-3"
+                    className="p-3.5 rounded-lg border border-[#DCD6CA] dark:border-white/10 bg-[#FAF8F4] dark:bg-[#17171F] flex items-start justify-between gap-3"
                   >
                     <div className="space-y-1 min-w-0">
                       <div className="flex flex-wrap items-center gap-2 text-[11px] font-mono-tech">
-                        <span className="text-[#E5A93C] font-semibold">
+                        <span className="text-amber-700 dark:text-[#E5A93C] font-semibold">
                           {LEARNING_CATEGORY_LABELS[lesson.category] || lesson.category}
                         </span>
-                        <span aria-hidden="true" className="text-[#6E6A63]">
+                        <span aria-hidden="true" className="text-[#A8A29E] dark:text-[#6E6A63]">
                           ·
                         </span>
-                        <span className="inline-flex items-center gap-1 text-[#C8C3BA]">
-                          <Star className="w-3 h-3 text-[#E5A93C]" />
+                        <span className="inline-flex items-center gap-1 text-[#3F3F46] dark:text-[#C8C3BA]">
+                          <Star className="w-3 h-3 text-amber-600 dark:text-[#E5A93C]" />
                           {lesson.rating}/5
                         </span>
-                        <span aria-hidden="true" className="text-[#6E6A63]">
+                        <span aria-hidden="true" className="text-[#A8A29E] dark:text-[#6E6A63]">
                           ·
                         </span>
-                        <span className="text-[#8D8981] truncate max-w-[240px]">
+                        <span className="text-[#57534E] dark:text-[#8D8981] truncate max-w-[240px]">
                           {lesson.sourceProjectTitle}
                         </span>
                       </div>
-                      <p className="text-xs text-[#EAE6DE] leading-relaxed">{lesson.insight}</p>
+                      <p className="text-xs text-[#27272A] dark:text-[#EAE6DE] leading-relaxed">{lesson.insight}</p>
                     </div>
                     <button
                       type="button"
                       disabled={deletingId === lesson.id}
                       onClick={() => void handleDelete(lesson.id)}
                       aria-label="Eliminar lección"
-                      className="p-1.5 rounded-md text-[#8D8981] hover:text-[#FCA5A5] hover:bg-white/5 disabled:opacity-50 shrink-0"
+                      className="p-1.5 rounded-md text-[#78746C] dark:text-[#8D8981] hover:text-red-700 dark:hover:text-[#FCA5A5] hover:bg-black/5 dark:hover:bg-white/5 disabled:opacity-50 shrink-0"
                     >
                       <Trash2 className="w-3.5 h-3.5" />
                     </button>

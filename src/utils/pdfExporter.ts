@@ -1,5 +1,9 @@
 import { jsPDF } from 'jspdf';
-import type { ProductionProject, ProductionSequence } from '../types/studio';
+import type {
+  ExternalProductionGuide,
+  ProductionProject,
+  ProductionSequence,
+} from '../types/studio';
 import { canExportPdfForSequence, getFinalSequences } from './learningEngine';
 
 interface ImageLoadResult {
@@ -351,3 +355,68 @@ export async function exportLibraryPdf(project: ProductionProject): Promise<void
     .replace(/^_+|_+$/g, '');
   writer.doc.save(`${safeSlug || 'biblioteca'}_final.pdf`);
 }
+
+export async function exportExternalGuidePdf(guide: ExternalProductionGuide): Promise<void> {
+  const writer = createPdfWriter(`${guide.agentName} · ${guide.projectTitle}`);
+
+  writer.addParagraph(
+    `${guide.agentName.toUpperCase()} — GUÍA PASO A PASO DE PRODUCCIÓN EXTERNA`,
+    {
+      bold: true,
+      size: 15,
+      color: [20, 20, 26],
+    }
+  );
+  writer.addParagraph(
+    `Proyecto: ${guide.projectTitle} (${guide.genreStyle}) · Alcance: ${
+      guide.scope === 'project' ? 'Proyecto Completo' : guide.sequenceTitle
+    } · Formato: ${guide.aspectRatio} (${guide.targetResolution})`,
+    { size: 9, color: [95, 95, 102] }
+  );
+
+  for (const section of guide.sections) {
+    writer.addSectionHeader(section.title);
+    writer.addParagraph(`Plataformas sugeridas: ${section.platformHint}`, {
+      bold: true,
+      size: 8.5,
+      color: [148, 98, 22],
+    });
+    writer.addParagraph(section.summary, { size: 9 });
+
+    for (const item of section.items) {
+      writer.addParagraph(`[${item.stepCode}] ${item.title}`, {
+        bold: true,
+        size: 9.5,
+        color: [20, 20, 26],
+      });
+      if (item.subtitle) {
+        writer.addParagraph(item.subtitle, { size: 8.5, color: [85, 85, 95] });
+      }
+      if (item.specs.length > 0) {
+        writer.addParagraph(
+          item.specs.map((sp) => `${sp.label}: ${sp.value}`).join(' · '),
+          { size: 8.5, color: [55, 55, 62] }
+        );
+      }
+      writer.addParagraph(item.instructions, { size: 9 });
+      if (item.copyPromptText) {
+        writer.addParagraph(`PROMPT / CONTENIDO:\n${item.copyPromptText}`, {
+          size: 8.2,
+          color: [42, 72, 108],
+        });
+      }
+      if (item.notes) {
+        writer.addParagraph(`Nota: ${item.notes}`, { size: 8.5, color: [95, 95, 102] });
+      }
+    }
+  }
+
+  writer.addFooters();
+
+  const safeSlug = `${guide.projectTitle}-guia-arthur`
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/gi, '_')
+    .replace(/^_+|_+$/g, '');
+  writer.doc.save(`${safeSlug || 'guia_arthur'}.pdf`);
+}
+

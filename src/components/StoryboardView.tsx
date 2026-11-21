@@ -1,6 +1,18 @@
 import { useState, useEffect } from 'react';
-import { Check, Copy, Film, ImagePlus, Maximize2, Sparkles, Video, X } from 'lucide-react';
+import {
+  Check,
+  Copy,
+  Film,
+  ImagePlus,
+  Maximize2,
+  PlugZap,
+  Sparkles,
+  Video,
+  X,
+} from 'lucide-react';
 import type {
+  ApiCapability,
+  ApiProviderPublicSummary,
   ProductionProject,
   ProductionSequence,
   ResolutionTier,
@@ -14,8 +26,10 @@ interface StoryboardViewProps {
   projectId: string;
   sequence: ProductionSequence;
   defaultResolution?: ResolutionTier;
+  providersStatus?: Record<ApiCapability, ApiProviderPublicSummary> | null;
   onEnsureProjectSynced: () => Promise<void>;
   onProjectMediaUpdated: (project: ProductionProject) => Promise<void>;
+  onOpenSettings?: () => void;
 }
 
 export function StoryboardView({
@@ -23,8 +37,10 @@ export function StoryboardView({
   projectId,
   sequence,
   defaultResolution = '4K',
+  providersStatus,
   onEnsureProjectSynced,
   onProjectMediaUpdated,
+  onOpenSettings,
 }: StoryboardViewProps) {
   const [activeCardId, setActiveCardId] = useState<string | null>(null);
   const [selectedResolution, setSelectedResolution] = useState<ResolutionTier>(
@@ -44,6 +60,34 @@ export function StoryboardView({
   const [directClipRatio, setDirectClipRatio] = useState<'16:9' | '9:16'>('16:9');
   const [directClipDuration, setDirectClipDuration] = useState<'4s' | '6s' | '8s' | '10s'>('6s');
   const [generatingDirectClip, setGeneratingDirectClip] = useState(false);
+
+  const [localProviders, setLocalProviders] = useState<
+    Record<ApiCapability, ApiProviderPublicSummary> | null
+  >(providersStatus || null);
+
+  useEffect(() => {
+    if (providersStatus) {
+      setLocalProviders(providersStatus);
+    }
+  }, [providersStatus]);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetch('/api/providers', { headers: { 'x-user-id': userId } })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d: { providers?: Record<ApiCapability, ApiProviderPublicSummary> } | null) => {
+        if (!cancelled && d?.providers) {
+          setLocalProviders(d.providers);
+        }
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [userId]);
+
+  const activeImgProv = localProviders?.image;
+  const activeVidProv = localProviders?.video;
 
   const frames = sequence.storyboardFrames || [];
   const activeCard: StoryboardCard | null =
@@ -90,10 +134,10 @@ export function StoryboardView({
         return data.project || null;
       }
       if (data.status === 'failed') {
-        throw new Error(data.error || 'Omni Flash no pudo finalizar el renderizado del video.');
+        throw new Error(data.error || 'La API de video no pudo finalizar el renderizado del clip.');
       }
     }
-    throw new Error('Tiempo de espera agotado generando el video con Omni Flash.');
+    throw new Error('Tiempo de espera agotado generando el video.');
   }
 
   async function runVideoGeneration(payload: Record<string, unknown>, targetFrameId?: string) {
@@ -110,11 +154,11 @@ export function StoryboardView({
       status?: string;
       jobId?: string;
       project?: ProductionProject;
-    }>(res, 'No se pudo iniciar la generación de video con Omni Flash');
+    }>(res, 'No se pudo iniciar la generación de video');
 
     let finalProject: ProductionProject | null = data.project || null;
     if (data.status === 'pending' && data.jobId) {
-      setMediaNotice('Renderizando clip cinematográfico con Omni Flash (puede tardar 25-60s)...');
+      setMediaNotice('Renderizando clip cinematográfico con tu API de Video (puede tardar 25-60s)...');
       finalProject = await pollVideoJobUntilDone(data.jobId);
     }
     if (finalProject) {
@@ -160,11 +204,11 @@ export function StoryboardView({
       if (warnings.length > 0 && renderedCount === 0) {
         setMediaError(warnings[0]);
         setMediaNotice(
-          `El Agente Director diseñó los 4 frames en texto (0/4 imágenes renderizadas con Nano).`
+          `El Agente Arthur diseñó los 4 frames en texto (0/4 imágenes renderizadas). Configura una API de Imágenes (free o de pago) para generarlas.`
         );
       } else if (warnings.length > 0 && renderedCount < 4) {
         setMediaNotice(
-          `El Agente Director diseñó los 4 frames clave (${renderedCount}/4 renderizados con Nano). Aviso visual: ${warnings[0]}`
+          `El Agente Arthur diseñó los 4 frames clave (${renderedCount}/4 renderizados). Aviso visual: ${warnings[0]}`
         );
       } else {
         setMediaNotice(
@@ -278,26 +322,49 @@ export function StoryboardView({
     <div className="space-y-6 max-w-6xl">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h2 className="font-display text-lg font-semibold text-[#F2F0EB]">
-            Storyboard y Generación Visual (Nano &amp; Omni Flash)
+          <h2 className="font-display text-lg font-semibold text-[#18181B] dark:text-[#F2F0EB]">
+            Storyboard y Generación Visual (Imágenes y Video Configurables)
           </h2>
-          <p className="text-xs text-[#8D8981] mt-0.5">
-            Genera 4 frames clave con Nano, crea clips directos Texto→Video o anima cada fotograma con Omni Flash.
+          <p className="text-xs text-[#57534E] dark:text-[#8D8981] mt-0.5">
+            Imagen:{' '}
+            <span className="font-mono-tech text-[#18181B] dark:text-[#E6E2DA]">
+              {activeImgProv?.configured
+                ? `${activeImgProv.label} (${activeImgProv.tier.toUpperCase()})`
+                : 'Sin API asignada'}
+            </span>
+            {' · '}
+            Video:{' '}
+            <span className="font-mono-tech text-[#18181B] dark:text-[#E6E2DA]">
+              {activeVidProv?.configured
+                ? `${activeVidProv.label} (${activeVidProv.tier.toUpperCase()})`
+                : 'Sin API asignada'}
+            </span>
           </p>
         </div>
-        <div className="flex flex-wrap items-center gap-3">
+        <div className="flex flex-wrap items-center gap-2.5">
+          {onOpenSettings && (
+            <button
+              type="button"
+              onClick={onOpenSettings}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-[#D6D1C7] dark:border-white/15 bg-[#FFFFFF] dark:bg-[#16161E] hover:border-[#E5A93C] text-xs font-medium text-[#18181B] dark:text-[#F2F0EB] whitespace-nowrap"
+            >
+              <PlugZap className="w-3.5 h-3.5 text-amber-600 dark:text-[#E5A93C]" />
+              <span>Configurar APIs</span>
+            </button>
+          )}
+
           <div className="flex items-center gap-2">
             <label
               htmlFor="storyboard-resolution-select"
-              className="text-xs text-[#C8C3BA] whitespace-nowrap"
+              className="text-xs text-[#3F3F46] dark:text-[#C8C3BA] whitespace-nowrap"
             >
-              Resolución Nano:
+              Resolución:
             </label>
             <select
               id="storyboard-resolution-select"
               value={selectedResolution}
               onChange={(e) => setSelectedResolution(e.target.value as ResolutionTier)}
-              className="rounded-lg border border-white/12 bg-[#0B0B0E] px-2.5 py-1.5 text-xs font-mono-tech text-[#E5A93C] focus:border-[#E5A93C] focus:outline-none"
+              className="rounded-lg border border-[#D6D1C7] dark:border-white/12 bg-[#FFFFFF] dark:bg-[#0B0B0E] px-2.5 py-1.5 text-xs font-mono-tech text-amber-700 dark:text-[#E5A93C] focus:border-[#E5A93C] focus:outline-none"
             >
               {RESOLUTION_OPTIONS.map((opt) => (
                 <option key={opt.value} value={opt.value}>
@@ -317,34 +384,36 @@ export function StoryboardView({
             <span>
               {autoGenerating4
                 ? 'Dirigiendo 4 frames clave...'
-                : 'Auto-generar 4 frames clave (Agente Director)'}
+                : 'Auto-generar 4 frames clave (Agente Arthur)'}
             </span>
           </button>
 
-          <span className="text-xs font-mono-tech text-[#8D8981] tabular-nums">
+          <span className="text-xs font-mono-tech text-[#57534E] dark:text-[#8D8981] tabular-nums">
             {frames.length} {frames.length === 1 ? 'fotograma' : 'fotogramas'}
           </span>
         </div>
       </div>
 
-      {/* Standalone Text-to-Video Studio (16:9 or 9:16 via gemini-omni-1.2-flash) */}
+      {/* Standalone Text-to-Video Studio (uses user-supplied Free or Paid Video API) */}
       <form
         onSubmit={handleGenerateDirectClip}
-        className="p-4 rounded-xl border border-[#38B2AC]/30 bg-[#10181B] space-y-3"
+        className="p-4 rounded-xl border border-teal-600/35 dark:border-[#38B2AC]/30 bg-teal-50/60 dark:bg-[#10181B] space-y-3"
       >
         <div className="flex flex-wrap items-center justify-between gap-2">
-          <div className="flex items-center gap-2 text-xs font-semibold text-[#5EEAD4]">
+          <div className="flex items-center gap-2 text-xs font-semibold text-teal-800 dark:text-[#5EEAD4]">
             <Video className="w-4 h-4 shrink-0" />
-            <span>Generador Directo Texto → Video (Omni Flash)</span>
+            <span>Generador Directo Texto → Video</span>
           </div>
-          <span className="text-[11px] font-mono-tech text-[#8D8981]">
-            gemini-omni-1.2-flash · 720p MP4
+          <span className="text-[11px] font-mono-tech text-[#57534E] dark:text-[#8D8981]">
+            {activeVidProv?.configured
+              ? `${activeVidProv.label} · ${activeVidProv.model || activeVidProv.tier}`
+              : 'Requiere API de Video en Configuración'}
           </span>
         </div>
 
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-3 items-end">
           <div className="lg:col-span-7">
-            <label htmlFor="direct-video-prompt" className="block text-[11px] text-[#C8C3BA] mb-1">
+            <label htmlFor="direct-video-prompt" className="block text-[11px] text-[#3F3F46] dark:text-[#C8C3BA] mb-1">
               Prompt cinematográfico del clip (sin requerir fotograma previo)
             </label>
             <input
@@ -353,19 +422,19 @@ export function StoryboardView({
               value={directClipPrompt}
               onChange={(e) => setDirectClipPrompt(e.target.value)}
               placeholder="Ej: Slow tracking dolly through rainy neon harbor at night, anamorphic reflections, 35mm film grain..."
-              className="w-full rounded-lg border border-white/15 bg-[#0B0B0E] px-3 py-2 text-xs text-[#F2F0EB] placeholder:text-[#6E6A63] focus:border-[#38B2AC] focus:outline-none"
+              className="w-full rounded-lg border border-[#D6D1C7] dark:border-white/15 bg-[#FFFFFF] dark:bg-[#0B0B0E] px-3 py-2 text-xs text-[#18181B] dark:text-[#F2F0EB] placeholder:text-[#78746C] dark:placeholder:text-[#6E6A63] focus:border-[#38B2AC] focus:outline-none"
             />
           </div>
 
           <div className="lg:col-span-2">
-            <label htmlFor="direct-video-ratio" className="block text-[11px] text-[#C8C3BA] mb-1">
+            <label htmlFor="direct-video-ratio" className="block text-[11px] text-[#3F3F46] dark:text-[#C8C3BA] mb-1">
               Formato
             </label>
             <select
               id="direct-video-ratio"
               value={directClipRatio}
               onChange={(e) => setDirectClipRatio(e.target.value as '16:9' | '9:16')}
-              className="w-full rounded-lg border border-white/15 bg-[#0B0B0E] px-2.5 py-2 text-xs font-mono-tech text-[#F2F0EB] focus:border-[#38B2AC] focus:outline-none"
+              className="w-full rounded-lg border border-[#D6D1C7] dark:border-white/15 bg-[#FFFFFF] dark:bg-[#0B0B0E] px-2.5 py-2 text-xs font-mono-tech text-[#18181B] dark:text-[#F2F0EB] focus:border-[#38B2AC] focus:outline-none"
             >
               <option value="16:9">16:9 Cine</option>
               <option value="9:16">9:16 Vertical</option>
@@ -373,7 +442,7 @@ export function StoryboardView({
           </div>
 
           <div className="lg:col-span-1">
-            <label htmlFor="direct-video-dur" className="block text-[11px] text-[#C8C3BA] mb-1">
+            <label htmlFor="direct-video-dur" className="block text-[11px] text-[#3F3F46] dark:text-[#C8C3BA] mb-1">
               Duración
             </label>
             <select
@@ -382,7 +451,7 @@ export function StoryboardView({
               onChange={(e) =>
                 setDirectClipDuration(e.target.value as '4s' | '6s' | '8s' | '10s')
               }
-              className="w-full rounded-lg border border-white/15 bg-[#0B0B0E] px-2 py-2 text-xs font-mono-tech text-[#F2F0EB] focus:border-[#38B2AC] focus:outline-none"
+              className="w-full rounded-lg border border-[#D6D1C7] dark:border-white/15 bg-[#FFFFFF] dark:bg-[#0B0B0E] px-2 py-2 text-xs font-mono-tech text-[#18181B] dark:text-[#F2F0EB] focus:border-[#38B2AC] focus:outline-none"
             >
               <option value="4s">4s</option>
               <option value="6s">6s</option>
@@ -405,13 +474,13 @@ export function StoryboardView({
       </form>
 
       {mediaNotice && (
-        <div className="rounded-lg border border-[#38B2AC]/35 bg-[#122625] px-4 py-3 text-xs text-[#A7F3D0] flex items-center justify-between gap-3">
+        <div className="rounded-lg border border-teal-300 dark:border-[#38B2AC]/35 bg-teal-50 dark:bg-[#122625] px-4 py-3 text-xs text-teal-900 dark:text-[#A7F3D0] flex items-center justify-between gap-3">
           <span>{mediaNotice}</span>
           <button
             type="button"
             onClick={() => setMediaNotice(null)}
             aria-label="Cerrar aviso"
-            className="p-1 rounded hover:bg-white/10"
+            className="p-1 rounded hover:bg-black/5 dark:hover:bg-white/10"
           >
             <X className="w-3.5 h-3.5" />
           </button>
@@ -421,17 +490,28 @@ export function StoryboardView({
       {mediaError && (
         <div
           role="alert"
-          className="rounded-lg border border-[#EF4444]/35 bg-[#3B1515]/50 px-4 py-3 text-xs text-[#FCA5A5] flex items-center justify-between gap-3"
+          className="rounded-lg border border-red-300 dark:border-[#EF4444]/35 bg-red-50 dark:bg-[#3B1515]/50 px-4 py-3 text-xs text-red-700 dark:text-[#FCA5A5] flex flex-wrap items-center justify-between gap-3"
         >
-          <span>{mediaError}</span>
-          <button
-            type="button"
-            onClick={() => setMediaError(null)}
-            aria-label="Cerrar aviso de error"
-            className="p-1 rounded hover:bg-white/10"
-          >
-            <X className="w-3.5 h-3.5" />
-          </button>
+          <span className="flex-1 min-w-[200px]">{mediaError}</span>
+          <div className="flex items-center gap-2 shrink-0">
+            {onOpenSettings && (
+              <button
+                type="button"
+                onClick={onOpenSettings}
+                className="px-2.5 py-1 rounded-md bg-[#E5A93C] hover:bg-[#EDA949] text-[#0B0B0E] text-[11px] font-semibold whitespace-nowrap"
+              >
+                Configurar APIs ahora
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={() => setMediaError(null)}
+              aria-label="Cerrar aviso de error"
+              className="p-1 rounded hover:bg-black/5 dark:hover:bg-white/10"
+            >
+              <X className="w-3.5 h-3.5" />
+            </button>
+          </div>
         </div>
       )}
 
@@ -446,9 +526,9 @@ export function StoryboardView({
           return (
             <article
               key={frame.id}
-              className="rounded-xl border border-white/10 bg-[#131318] overflow-hidden flex flex-col"
+              className="rounded-xl border border-[#DCD6CA] dark:border-white/10 bg-[#FFFFFF] dark:bg-[#131318] overflow-hidden flex flex-col shadow-xs dark:shadow-none"
             >
-              <div className="relative aspect-video bg-[#08080B] border-b border-white/10 overflow-hidden">
+              <div className="relative aspect-video bg-[#08080B] border-b border-[#DCD6CA] dark:border-white/10 overflow-hidden">
                 {showVideo && frame.videoUrl ? (
                   <video
                     src={frame.videoUrl}
@@ -524,14 +604,14 @@ export function StoryboardView({
               <div className="p-4 flex-1 flex flex-col justify-between space-y-4">
                 <div>
                   <div className="flex items-center justify-between gap-2">
-                    <h3 className="font-display text-sm font-semibold text-[#F2F0EB]">
+                    <h3 className="font-display text-sm font-semibold text-[#18181B] dark:text-[#F2F0EB]">
                       {frame.title}
                     </h3>
-                    <span className="text-[11px] font-mono-tech text-[#E5A93C]">
+                    <span className="text-[11px] font-mono-tech text-amber-700 dark:text-[#E5A93C]">
                       {frame.shotRef}
                     </span>
                   </div>
-                  <p className="text-xs font-mono-tech text-[#8D8981] mt-1">
+                  <p className="text-xs font-mono-tech text-[#57534E] dark:text-[#8D8981] mt-1">
                     {frame.cameraSpec} · {frame.aspectRatio}
                   </p>
                 </div>
@@ -542,9 +622,9 @@ export function StoryboardView({
                     type="button"
                     onClick={() => handleGenerateImage(frame)}
                     disabled={busyImg || busyVid || autoGenerating4 || generatingDirectClip}
-                    className="flex-1 min-w-[165px] inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg border border-[#E5A93C]/45 bg-[#1B1812] hover:bg-[#272116] disabled:opacity-60 text-xs font-medium text-[#F2F0EB] whitespace-nowrap transition-colors"
+                    className="flex-1 min-w-[165px] inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg border border-amber-500/45 dark:border-[#E5A93C]/45 bg-amber-50 dark:bg-[#1B1812] hover:bg-amber-100 dark:hover:bg-[#272116] disabled:opacity-60 text-xs font-medium text-[#18181B] dark:text-[#F2F0EB] whitespace-nowrap transition-colors"
                   >
-                    <ImagePlus className="w-3.5 h-3.5 text-[#E5A93C] shrink-0" />
+                    <ImagePlus className="w-3.5 h-3.5 text-amber-600 dark:text-[#E5A93C] shrink-0" />
                     <span>
                       {busyImg ? 'Generando Nano...' : 'Generar imagen (Nano)'}
                     </span>
@@ -554,25 +634,25 @@ export function StoryboardView({
                     type="button"
                     onClick={() => handleGenerateVideo(frame)}
                     disabled={busyImg || busyVid || autoGenerating4 || generatingDirectClip}
-                    className="flex-1 min-w-[180px] inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg border border-white/15 bg-[#181822] hover:bg-[#222230] disabled:opacity-60 text-xs font-medium text-[#F2F0EB] whitespace-nowrap transition-colors"
+                    className="flex-1 min-w-[180px] inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg border border-[#D6D1C7] dark:border-white/15 bg-[#FAF8F4] dark:bg-[#181822] hover:bg-[#EFECE4] dark:hover:bg-[#222230] disabled:opacity-60 text-xs font-medium text-[#18181B] dark:text-[#F2F0EB] whitespace-nowrap transition-colors"
                   >
-                    <Video className="w-3.5 h-3.5 text-[#38B2AC] shrink-0" />
+                    <Video className="w-3.5 h-3.5 text-teal-600 dark:text-[#38B2AC] shrink-0" />
                     <span>
                       {busyVid ? 'Renderizando Omni...' : 'Generar video (Omni Flash)'}
                     </span>
                   </button>
                 </div>
 
-                <div className="space-y-3 pt-3 border-t border-white/5">
+                <div className="space-y-3 pt-3 border-t border-[#EBE7DF] dark:border-white/5">
                   <div>
                     <div className="flex items-center justify-between mb-1">
-                      <span className="text-[11px] font-medium text-[#C8C3BA]">
+                      <span className="text-[11px] font-medium text-[#3F3F46] dark:text-[#C8C3BA]">
                         Prompt de Fotograma (Nano)
                       </span>
                       <button
                         type="button"
                         onClick={() => copyText(`${frame.id}-img`, frame.visualPrompt)}
-                        className="inline-flex items-center gap-1 text-[11px] text-[#E5A93C] hover:text-[#F4C46A]"
+                        className="inline-flex items-center gap-1 text-[11px] text-amber-700 dark:text-[#E5A93C] hover:text-amber-900 dark:hover:text-[#F4C46A]"
                       >
                         {copiedId === `${frame.id}-img` ? (
                           <>
@@ -587,20 +667,20 @@ export function StoryboardView({
                         )}
                       </button>
                     </div>
-                    <p className="text-xs text-[#A7A299] leading-relaxed line-clamp-3">
+                    <p className="text-xs text-[#52525B] dark:text-[#A7A299] leading-relaxed line-clamp-3">
                       {frame.visualPrompt}
                     </p>
                   </div>
 
                   <div>
                     <div className="flex items-center justify-between mb-1">
-                      <span className="text-[11px] font-medium text-[#C8C3BA]">
+                      <span className="text-[11px] font-medium text-[#3F3F46] dark:text-[#C8C3BA]">
                         Prompt de Movimiento (Omni Flash)
                       </span>
                       <button
                         type="button"
                         onClick={() => copyText(`${frame.id}-veo`, frame.veoMotionPrompt)}
-                        className="inline-flex items-center gap-1 text-[11px] text-[#E5A93C] hover:text-[#F4C46A]"
+                        className="inline-flex items-center gap-1 text-[11px] text-amber-700 dark:text-[#E5A93C] hover:text-amber-900 dark:hover:text-[#F4C46A]"
                       >
                         {copiedId === `${frame.id}-veo` ? (
                           <>
@@ -615,7 +695,7 @@ export function StoryboardView({
                         )}
                       </button>
                     </div>
-                    <p className="text-xs text-[#A7A299] leading-relaxed line-clamp-2">
+                    <p className="text-xs text-[#52525B] dark:text-[#A7A299] leading-relaxed line-clamp-2">
                       {frame.veoMotionPrompt}
                     </p>
                   </div>
@@ -632,15 +712,15 @@ export function StoryboardView({
           role="dialog"
           aria-modal="true"
           aria-labelledby="lightbox-title"
-          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/90"
+          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 dark:bg-black/90"
         >
-          <div className="w-full max-w-4xl rounded-xl border border-white/15 bg-[#121217] overflow-hidden">
-            <div className="px-5 py-3.5 border-b border-white/10 flex items-center justify-between">
+          <div className="w-full max-w-4xl rounded-xl border border-[#DCD6CA] dark:border-white/15 bg-[#FFFFFF] dark:bg-[#121217] overflow-hidden shadow-2xl">
+            <div className="px-5 py-3.5 border-b border-[#E2DDD3] dark:border-white/10 flex items-center justify-between">
               <div>
-                <h3 id="lightbox-title" className="font-display text-base font-semibold text-[#F2F0EB]">
+                <h3 id="lightbox-title" className="font-display text-base font-semibold text-[#18181B] dark:text-[#F2F0EB]">
                   {activeCard.title}
                 </h3>
-                <p className="text-xs font-mono-tech text-[#8D8981]">
+                <p className="text-xs font-mono-tech text-[#57534E] dark:text-[#8D8981]">
                   {activeCard.shotRef} · {activeCard.cameraSpec} · {activeCard.aspectRatio}
                 </p>
               </div>
@@ -648,13 +728,13 @@ export function StoryboardView({
                 type="button"
                 onClick={() => setActiveCardId(null)}
                 aria-label="Cerrar vista ampliada"
-                className="p-2 rounded-lg text-[#C8C3BA] hover:bg-white/10"
+                className="p-2 rounded-lg text-[#57534E] dark:text-[#C8C3BA] hover:bg-black/5 dark:hover:bg-white/10"
               >
                 <X className="w-4 h-4" />
               </button>
             </div>
 
-            <div className="aspect-video bg-[#07070A] border-b border-white/10">
+            <div className="aspect-video bg-[#07070A] border-b border-[#E2DDD3] dark:border-white/10">
               {activeCard.videoUrl &&
               (mediaMode[activeCard.id] === 'video' || !activeCard.imageUrl) ? (
                 <video
@@ -687,9 +767,9 @@ export function StoryboardView({
                   type="button"
                   onClick={() => handleGenerateImage(activeCard)}
                   disabled={generatingImgId === activeCard.id || generatingVidId === activeCard.id}
-                  className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg border border-[#E5A93C]/45 bg-[#1B1812] hover:bg-[#272116] disabled:opacity-60 text-xs font-medium text-[#F2F0EB]"
+                  className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg border border-amber-500/45 dark:border-[#E5A93C]/45 bg-amber-50 dark:bg-[#1B1812] hover:bg-amber-100 dark:hover:bg-[#272116] disabled:opacity-60 text-xs font-medium text-[#18181B] dark:text-[#F2F0EB]"
                 >
-                  <ImagePlus className="w-3.5 h-3.5 text-[#E5A93C]" />
+                  <ImagePlus className="w-3.5 h-3.5 text-amber-600 dark:text-[#E5A93C]" />
                   <span>
                     {generatingImgId === activeCard.id
                       ? 'Generando con Nano...'
@@ -700,9 +780,9 @@ export function StoryboardView({
                   type="button"
                   onClick={() => handleGenerateVideo(activeCard)}
                   disabled={generatingImgId === activeCard.id || generatingVidId === activeCard.id}
-                  className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg border border-white/15 bg-[#181822] hover:bg-[#222230] disabled:opacity-60 text-xs font-medium text-[#F2F0EB]"
+                  className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg border border-[#D6D1C7] dark:border-white/15 bg-[#FAF8F4] dark:bg-[#181822] hover:bg-[#EFECE4] dark:hover:bg-[#222230] disabled:opacity-60 text-xs font-medium text-[#18181B] dark:text-[#F2F0EB]"
                 >
-                  <Video className="w-3.5 h-3.5 text-[#38B2AC]" />
+                  <Video className="w-3.5 h-3.5 text-teal-600 dark:text-[#38B2AC]" />
                   <span>
                     {generatingVidId === activeCard.id
                       ? 'Generando con Omni Flash...'
@@ -713,14 +793,14 @@ export function StoryboardView({
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
                 <div>
-                  <div className="font-medium text-[#E5A93C] mb-1">Prompt Visual (Nano)</div>
-                  <p className="text-[#D4CFC7] leading-relaxed">{activeCard.visualPrompt}</p>
+                  <div className="font-medium text-amber-700 dark:text-[#E5A93C] mb-1">Prompt Visual (Nano)</div>
+                  <p className="text-[#27272A] dark:text-[#D4CFC7] leading-relaxed">{activeCard.visualPrompt}</p>
                 </div>
                 <div>
-                  <div className="font-medium text-[#E5A93C] mb-1">
+                  <div className="font-medium text-amber-700 dark:text-[#E5A93C] mb-1">
                     Prompt de Cámara (Omni Flash)
                   </div>
-                  <p className="text-[#D4CFC7] leading-relaxed">{activeCard.veoMotionPrompt}</p>
+                  <p className="text-[#27272A] dark:text-[#D4CFC7] leading-relaxed">{activeCard.veoMotionPrompt}</p>
                 </div>
               </div>
             </div>

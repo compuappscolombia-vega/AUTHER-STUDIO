@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import {
   ArrowRight,
+  Bot,
   CheckCircle2,
   ChevronDown,
   ChevronUp,
@@ -23,6 +24,7 @@ interface WorkflowStepperBarProps {
   onOpenIngest: () => void;
   onApproveFinal: () => Promise<void>;
   onOpenLiveVoice: () => void;
+  onOpenExternalGuide?: () => void;
   finalizingSeq: boolean;
 }
 
@@ -35,6 +37,7 @@ export function WorkflowStepperBar({
   onOpenIngest,
   onApproveFinal,
   onOpenLiveVoice,
+  onOpenExternalGuide,
   finalizingSeq,
 }: WorkflowStepperBarProps) {
   const [expanded, setExpanded] = useState(true);
@@ -56,7 +59,7 @@ export function WorkflowStepperBar({
   return (
     <section
       aria-label="Orden de ejecución paso a paso"
-      className="no-print border-b border-white/10 bg-[#0D0D12] px-4 sm:px-5 py-2.5 shrink-0"
+      className="no-print border-b border-[#E2DDD3] dark:border-white/10 bg-[#FAF8F4] dark:bg-[#0D0D12] px-4 sm:px-5 py-2.5 shrink-0"
     >
       <div className="flex flex-wrap items-center justify-between gap-2.5">
         <div className="flex items-center gap-2.5 min-w-0">
@@ -64,31 +67,42 @@ export function WorkflowStepperBar({
             type="button"
             onClick={() => setExpanded((v) => !v)}
             aria-expanded={expanded}
-            className="inline-flex items-center gap-1.5 text-xs font-semibold text-[#F2F0EB] hover:text-[#E5A93C] whitespace-nowrap"
+            className="inline-flex items-center gap-1.5 text-xs font-semibold text-[#18181B] hover:text-amber-700 dark:text-[#F2F0EB] dark:hover:text-[#E5A93C] whitespace-nowrap"
           >
-            <HelpCircle className="w-3.5 h-3.5 text-[#E5A93C] shrink-0" />
+            <HelpCircle className="w-3.5 h-3.5 text-amber-600 dark:text-[#E5A93C] shrink-0" />
             <span>Guía Paso a Paso ({workflow.completedCount}/6)</span>
             {expanded ? (
-              <ChevronUp className="w-3.5 h-3.5 text-[#8D8981]" />
+              <ChevronUp className="w-3.5 h-3.5 text-[#57534E] dark:text-[#8D8981]" />
             ) : (
-              <ChevronDown className="w-3.5 h-3.5 text-[#8D8981]" />
+              <ChevronDown className="w-3.5 h-3.5 text-[#57534E] dark:text-[#8D8981]" />
             )}
           </button>
 
-          <span className="hidden md:inline text-[11px] font-mono-tech text-[#8D8981] tabular-nums">
+          <span className="hidden md:inline text-[11px] font-mono-tech text-[#57534E] dark:text-[#8D8981] tabular-nums">
             · {workflow.percentComplete}% completado
           </span>
 
-          <span className="hidden lg:inline text-xs text-[#CFCAC0] truncate max-w-xl">
+          <span className="hidden lg:inline text-xs text-[#3F3F46] dark:text-[#CFCAC0] truncate max-w-xl">
             · {workflow.summaryHint}
           </span>
         </div>
 
-        <div className="flex items-center gap-2 shrink-0">
+        <div className="flex flex-wrap items-center gap-2 shrink-0">
+          {activeSequence && onOpenExternalGuide && (
+            <button
+              type="button"
+              onClick={onOpenExternalGuide}
+              className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-amber-600/35 dark:border-[#E5A93C]/40 bg-amber-50 hover:bg-amber-100 dark:bg-[#1B1710] dark:hover:bg-[#262015] text-[11px] font-medium text-amber-800 dark:text-[#E5A93C] whitespace-nowrap shrink-0"
+            >
+              <Bot className="w-3.5 h-3.5 shrink-0" />
+              <span>Documento Externa Arthur</span>
+            </button>
+          )}
+
           <button
             type="button"
             onClick={onOpenLiveVoice}
-            className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-[#38B2AC]/45 bg-[#102625] hover:bg-[#163433] text-[11px] font-medium text-[#5EEAD4] whitespace-nowrap shrink-0"
+            className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-teal-600/35 dark:border-[#38B2AC]/45 bg-teal-50 hover:bg-teal-100 dark:bg-[#102625] dark:hover:bg-[#163433] text-[11px] font-medium text-teal-800 dark:text-[#5EEAD4] whitespace-nowrap shrink-0"
           >
             <Mic className="w-3.5 h-3.5 shrink-0" />
             <span>Hablar con Director (Voz Live)</span>
@@ -128,29 +142,29 @@ export function WorkflowStepperBar({
                 }}
                 className={`text-left rounded-lg border px-2.5 py-2 transition-colors flex flex-col justify-between gap-1 ${
                   step.active || isTabFocused
-                    ? 'border-[#E5A93C] bg-[#1A160E]'
+                    ? 'border-[#E5A93C] bg-amber-50 dark:bg-[#1A160E]'
                     : step.completed
-                      ? 'border-[#38B2AC]/35 bg-[#101C1C]'
-                      : 'border-white/10 bg-[#131318] hover:border-white/25'
+                      ? 'border-teal-600/35 dark:border-[#38B2AC]/35 bg-teal-50/70 dark:bg-[#101C1C]'
+                      : 'border-[#DCD6CA] dark:border-white/10 bg-[#FFFFFF] dark:bg-[#131318] hover:border-[#C2BBB0] dark:hover:border-white/25'
                 }`}
               >
                 <div className="flex items-center justify-between gap-1.5 w-full">
                   <span
                     className={`text-[11px] font-semibold truncate ${
                       step.active
-                        ? 'text-[#E5A93C]'
+                        ? 'text-amber-700 dark:text-[#E5A93C]'
                         : step.completed
-                          ? 'text-[#5EEAD4]'
-                          : 'text-[#EAE6DE]'
+                          ? 'text-teal-700 dark:text-[#5EEAD4]'
+                          : 'text-[#18181B] dark:text-[#EAE6DE]'
                     }`}
                   >
                     {step.title}
                   </span>
                   {step.completed && (
-                    <CheckCircle2 className="w-3.5 h-3.5 text-[#38B2AC] shrink-0" />
+                    <CheckCircle2 className="w-3.5 h-3.5 text-teal-700 dark:text-[#38B2AC] shrink-0" />
                   )}
                 </div>
-                <p className="text-[10px] text-[#9A968E] leading-snug line-clamp-2">
+                <p className="text-[10px] text-[#57534E] dark:text-[#9A968E] leading-snug line-clamp-2">
                   {step.whatItDoes}
                 </p>
               </button>
