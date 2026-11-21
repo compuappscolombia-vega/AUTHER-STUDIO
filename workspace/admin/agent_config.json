@@ -3,5 +3,13 @@
   "preferredVisualGrammar": "Composición arquitectónica de Hollywood, profundidad de campo motivada, iluminación práctica con contraste Kelvin realista y continuidad exacta de vestuario y utilería.",
   "customDirectives": "",
   "targetAudienceTone": "Cine autoral de prestigio internacional (IMAX / Festival de Cannes)",
-  "updatedAt": "2026-11-21T06:05:45.011Z"
+  "frameoIaEnabled": true,
+  "frameoIaAutoGenerateVideo": true,
+  "frameoIaModel": "Kling O3",
+  "frameoIaVfxMode": "Cambiar de contexto (Reemplazo de entorno / Chroma)",
+  "frameoIaRenderQuality": "480p_preview",
+  "frameoIaStylePreset": "Frameo IA Cinema 4K (Mini-Drama / Hiperrealismo)",
+  "frameoIaAspectRatio": "16:9",
+  "frameoIaClipDurationSec": 5,
+  "updatedAt": "2026-11-21T09:11:20.314Z"
 }

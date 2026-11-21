@@ -196,8 +196,37 @@ export interface ProductionSequence {
   storyboardFrames: StoryboardCard[];
   continuitySummary: string;
   sequenceRating?: number;
+  productionEngine?: 'standard' | 'frameo_ia';
+  frameoProductionSpec?: FrameoProductionSpec;
   createdAt: string;
   updatedAt?: string;
+}
+
+export interface FrameoSceneSpec {
+  sceneNumber: number;
+  shotRef: string;
+  sceneLabel: string;
+  characterAnchor: string;
+  frameoVisualPrompt: string;
+  frameoMotionPrompt: string;
+  narrationOrDialogue: string;
+  aspectRatio: string;
+  durationSec: number;
+}
+
+export interface FrameoProductionSpec {
+  engine: 'Frameo IA';
+  stylePreset: string;
+  modelName?: string;
+  vfxMantoMode?: string;
+  renderQuality?: '480p_preview' | 'full_hd';
+  shotNamingTemplate?: string;
+  aspectRatio: string;
+  clipDurationSec: number;
+  continuitySeedNote: string;
+  workflowChecklist: string[];
+  scenes: FrameoSceneSpec[];
+  generatedAt: string;
 }
 
 export interface TrailerBeat {
@@ -312,6 +341,14 @@ export interface AdminAgentProfile {
   preferredVisualGrammar: string;
   customDirectives: string;
   targetAudienceTone: string;
+  frameoIaEnabled?: boolean;
+  frameoIaAutoGenerateVideo?: boolean;
+  frameoIaModel?: string;
+  frameoIaVfxMode?: string;
+  frameoIaRenderQuality?: '480p_preview' | 'full_hd';
+  frameoIaStylePreset?: string;
+  frameoIaAspectRatio?: string;
+  frameoIaClipDurationSec?: number;
   updatedAt: string;
 }
 
@@ -342,11 +379,12 @@ export interface AgentDiagnosticReport {
   auditedAt: string;
 }
 
-export type ApiCapability = 'image' | 'video' | 'core';
+export type ApiCapability = 'image' | 'video' | 'core' | 'frameo_video';
 
 export type ApiBillingTier = 'free' | 'paid' | 'auto';
 
 export type ApiProviderKind =
+  | 'frameo_mcp'
   | 'gemini'
   | 'openai'
   | 'huggingface'
@@ -354,6 +392,12 @@ export type ApiProviderKind =
   | 'replicate'
   | 'pollinations'
   | 'custom_rest';
+
+export interface FrameoMcpToolSummary {
+  name: string;
+  description: string;
+  inputSchema?: Record<string, unknown>;
+}
 
 export interface ApiProviderInput {
   capability: ApiCapability;

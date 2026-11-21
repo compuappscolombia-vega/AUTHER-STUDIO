@@ -264,7 +264,7 @@ function buildSingleSequenceSections(
     },
   ];
 
-  return [
+  const baseSections: ExternalGuideSection[] = [
     {
       stepNumber: 1,
       id: `${stepPrefix}step-1-config`,
@@ -314,6 +314,50 @@ function buildSingleSequenceSections(
       items: step6Items,
     },
   ];
+
+  if (sequence.productionEngine === 'frameo_ia' && sequence.frameoProductionSpec) {
+    const spec = sequence.frameoProductionSpec;
+    const frameoItems: ExternalGuideStepItem[] = [
+      {
+        stepCode: `${stepPrefix}F.0`,
+        title: `Configuración Maestra Frameo IA (${spec.stylePreset})`,
+        subtitle: `Formato ${spec.aspectRatio} · Clips de ${spec.clipDurationSec}s · ArthurAgent Admin`,
+        specs: [
+          { label: 'Motor', value: spec.engine },
+          { label: 'Preset Visual', value: spec.stylePreset },
+          { label: 'Formato / Clip', value: `${spec.aspectRatio} · ${spec.clipDurationSec}s` },
+        ],
+        instructions: spec.workflowChecklist.join('\n'),
+        copyPromptLabel: 'Copiar Seed de Continuidad Frameo IA',
+        copyPromptText: spec.continuitySeedNote,
+      },
+      ...spec.scenes.map((sc) => ({
+        stepCode: `${stepPrefix}F.${sc.sceneNumber}`,
+        title: `Escena Frameo ${sc.sceneNumber}: ${sc.sceneLabel} (${sc.shotRef})`,
+        subtitle: `Duración ${sc.durationSec}s · ${sc.aspectRatio}`,
+        specs: [
+          { label: 'Character Anchor', value: sc.characterAnchor },
+          { label: 'Audio / Diálogo', value: sc.narrationOrDialogue },
+          { label: 'Duración Clip', value: `${sc.durationSec}s` },
+        ],
+        instructions: `1. Fija el Character Anchor en Frameo IA.\n2. Pega el Frameo Visual Prompt para generar el cuadro clave.\n3. Pega el Frameo Motion Prompt (${sc.durationSec}s) y sincroniza la línea de audio indicada.`,
+        copyPromptLabel: `Copiar Escena Frameo ${sc.sceneNumber}`,
+        copyPromptText: `[FRAMEO VISUAL PROMPT]:\n${sc.frameoVisualPrompt}\n\n[FRAMEO MOTION PROMPT (${sc.durationSec}s)]:\n${sc.frameoMotionPrompt}\n\n[CHARACTER ANCHOR]: ${sc.characterAnchor}\n[AUDIO / VO]: ${sc.narrationOrDialogue}`,
+      })),
+    ];
+
+    baseSections.push({
+      stepNumber: 7,
+      id: `${stepPrefix}step-frameo-ia`,
+      title: `Motor Frameo IA · Escenas Listas para Ejecutar (${spec.scenes.length} escenas)`,
+      platformHint: 'Frameo IA · Pipeline Administrador ArthurAgent',
+      summary:
+        'Paquete optimizado por ArthurAgent para producción directa en Frameo IA con anclajes de personaje, prompts visuales, movimiento y audio sincronizado.',
+      items: frameoItems,
+    });
+  }
+
+  return baseSections;
 }
 
 function buildTrailerSection(project: ProductionProject): ExternalGuideSection | null {

@@ -51,15 +51,32 @@ import {
   executeVideoGeneration,
   listPublicProviders,
   resolveProviderForCapability,
+  saveConnectedFrameoMcpProvider,
 } from './src/utils/serverProviderVault.ts';
+import {
+  DEFAULT_FRAMEO_MCP_URL,
+  callFrameoMcpTool,
+  completeFrameoOAuthCallback,
+  createFrameoOAuthAuthorizationUrl,
+  disconnectFrameoMcpSession,
+  getFrameoMcpPublicStatus,
+  listFrameoMcpTools,
+} from './src/utils/frameoMcpClient.ts';
 import {
   DEFAULT_ADMIN_AGENT_PROFILE,
   buildAdminTrainingPromptBlock,
+  buildFrameoProductionSpecForSequence,
   computeSequenceDiagnostics,
   normalizeAdminAgentProfile,
   normalizeFourKeyStoryboardFrames,
   validateAdminDirective,
 } from './src/utils/adminAndStoryboardLogic.ts';
+import {
+  ADMIN_UID,
+  getConfiguredAdminIdentity,
+  verifyAdminCredentials,
+  verifyFirebaseGoogleIdToken,
+} from './src/utils/adminAuth.ts';
 import { buildLocalPreviewFixture } from './src/utils/devPreviewFixture.ts';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -69,11 +86,16 @@ const PORT = Number(process.env.PORT) || 3000;
 const WORKSPACE_DIR = path.resolve(__dirname, 'workspace');
 const USERS_WORKSPACE_ROOT = path.join(WORKSPACE_DIR, 'users');
 
-const ADMIN_UID = 'admin-studio';
-const DEFAULT_ADMIN_USERNAME = 'Admin';
-const DEFAULT_ADMIN_EMAIL = 'compuappscolombia@gmail.com';
-const DEFAULT_ADMIN_SCRYPT_HASH =
-  'auteur-admin-v1-salt:0381eff372f9c0dd5bab36d6e29882738cf02e6a01d0adadf6bdf374f5705d2c938777ede60ed929b14e8afb21a96e32924b79c573aa5e3f2e83e65d1c2792b9';
+const FIREBASE_PROJECT_ID: string = (() => {
+  try {
+    const raw = fs.readFileSync(path.resolve(__dirname, 'firebase-applet-config.json'), 'utf-8');
+    const parsed = JSON.parse(raw) as { projectId?: string };
+    return (parsed.projectId || '').trim() || 'pelagic-cat-405307';
+  } catch {
+    return 'pelagic-cat-405307';
+  }
+})();
+
 const ADMIN_TOKEN_SECRET =
   (process.env.ADMIN_SESSION_SECRET || '').trim() || crypto.randomBytes(32).toString('hex');
 const ADMIN_TOKEN_TTL_MS = 1000 * 60 * 60 * 12;
@@ -82,55 +104,6 @@ interface AdminTokenPayload {
   uid: string;
   role: 'admin';
   exp: number;
-}
-
-function timingSafeEqualUtf8(a: string, b: string): boolean {
-  const digestA = crypto.createHash('sha256').update(a, 'utf8').digest();
-  const digestB = crypto.createHash('sha256').update(b, 'utf8').digest();
-  return crypto.timingSafeEqual(digestA, digestB);
-}
-
-function verifyScryptHash(password: string, storedHash: string): boolean {
-  const sepIdx = storedHash.indexOf(':');
-  if (sepIdx <= 0) return false;
-  const salt = storedHash.slice(0, sepIdx);
-  const expectedHex = storedHash.slice(sepIdx + 1).trim();
-  if (!salt || !/^[0-9a-fA-F]+$/.test(expectedHex)) return false;
-  const expectedBuf = Buffer.from(expectedHex, 'hex');
-  const derivedBuf = crypto.scryptSync(password, salt, expectedBuf.length);
-  return (
-    derivedBuf.length === expectedBuf.length &&
-    crypto.timingSafeEqual(derivedBuf, expectedBuf)
-  );
-}
-
-function getConfiguredAdminIdentity(): { username: string; email: string } {
-  const username = (process.env.ADMIN_USERNAME || '').trim() || DEFAULT_ADMIN_USERNAME;
-  const email = (process.env.ADMIN_EMAIL || '').trim() || DEFAULT_ADMIN_EMAIL;
-  return { username, email };
-}
-
-function verifyAdminCredentials(identifierRaw: string, passwordRaw: string): boolean {
-  const identifier = identifierRaw.trim().toLowerCase();
-  if (!identifier || !passwordRaw) return false;
-
-  const { username, email } = getConfiguredAdminIdentity();
-  const validIdentifiers = new Set([username.toLowerCase(), email.toLowerCase()]);
-  if (!validIdentifiers.has(identifier)) {
-    return false;
-  }
-
-  const configuredHash = (process.env.ADMIN_PASSWORD_HASH || '').trim();
-  if (configuredHash) {
-    return verifyScryptHash(passwordRaw, configuredHash);
-  }
-
-  const configuredPassword = (process.env.ADMIN_PASSWORD || '').trim();
-  if (configuredPassword) {
-    return timingSafeEqualUtf8(passwordRaw, configuredPassword);
-  }
-
-  return verifyScryptHash(passwordRaw, DEFAULT_ADMIN_SCRYPT_HASH);
 }
 
 function signAdminToken(uid: string): string {
@@ -212,6 +185,18 @@ function requireAdminAuth(
 
   req.adminUid = verified.uid;
   next();
+}
+
+function isVerifiedAdminRequest(req: express.Request): boolean {
+  const authHeader = req.headers.authorization;
+  const rawHeader = Array.isArray(authHeader) ? authHeader[0] : authHeader;
+  const token =
+    typeof rawHeader === 'string' && rawHeader.startsWith('Bearer ')
+      ? rawHeader.slice('Bearer '.length).trim()
+      : '';
+  if (!token) return false;
+  const verified = verifyAdminToken(token);
+  return Boolean(verified && verified.role === 'admin');
 }
 
 const AUDIO_EXTENSIONS = new Set([
@@ -658,11 +643,14 @@ interface VideoJobState {
   jobId: string;
   userId: string;
   projectId: string;
+  capability?: 'video' | 'frameo_video';
   status: 'pending' | 'completed' | 'failed';
   interactionId?: string;
   videoUrl?: string;
   project?: ProductionProject;
   error?: string;
+  frameoFailed?: boolean;
+  needsManualApiConfig?: boolean;
   createdAt: number;
 }
 
@@ -733,9 +721,14 @@ REGLAS DE ORO DE PRODUCCIÓN:
 7. STORYBOARD PROMPTS: Para cada tarjeta de storyboard, escribe el prompt visual hiperrealista detallado en inglés (adaptado a la ultra definición solicitada) y el prompt de movimiento de cámara en inglés.
 8. AUTOAPRENDIZAJE CONTINUO: Aplica activamente las lecciones acumuladas por el estudio que recibes en el contexto para mejorar tu criterio en cada nueva producción.`;
 
-function buildEffectiveProducerInstruction(lessons: LearningLesson[]): string {
+function buildEffectiveProducerInstruction(
+  lessons: LearningLesson[],
+  options?: { isAdmin?: boolean }
+): string {
   const adminProfile = ensureAdminAgentProfile();
-  const adminBlock = buildAdminTrainingPromptBlock(adminProfile);
+  const adminBlock = buildAdminTrainingPromptBlock(adminProfile, {
+    includeFrameoIa: Boolean(options?.isAdmin),
+  });
   const learningBlock = buildLearningPromptContext(lessons, 8);
   return `${PRODUCER_SYSTEM_INSTRUCTION}
 
@@ -1075,27 +1068,42 @@ async function startServer() {
     const userId = getRequestUserId(req);
     const apiKey = process.env.GEMINI_API_KEY;
     const geminiConfigured = Boolean(apiKey && apiKey !== 'MY_GEMINI_API_KEY');
-    const providers = listPublicProviders(userId, WORKSPACE_DIR);
+    const providers = listPublicProviders(userId, WORKSPACE_DIR, {
+      includeAdminFrameo: isVerifiedAdminRequest(req),
+    });
     res.json({ ok: true, geminiConfigured, providers });
   });
 
-  // Dynamic API Providers (Image & Video — free or paid, encrypted in server vault)
+  // Dynamic API Providers (Image, Video & Admin Frameo IA — free or paid, encrypted in server vault)
   app.get('/api/providers', (req, res) => {
     const userId = getRequestUserId(req);
-    const providers = listPublicProviders(userId, WORKSPACE_DIR);
+    const providers = listPublicProviders(userId, WORKSPACE_DIR, {
+      includeAdminFrameo: isVerifiedAdminRequest(req),
+    });
     res.json({ providers });
   });
 
   app.post('/api/providers/detect', async (req, res) => {
     try {
-      const userId = getRequestUserId(req);
+      const isAdminReq = isVerifiedAdminRequest(req);
+      const userId = isAdminReq ? ADMIN_UID : getRequestUserId(req);
       const body = req.body ?? {};
-      const capability =
-        body.capability === 'video'
-          ? 'video'
-          : body.capability === 'core'
-            ? 'core'
-            : 'image';
+      const capability: ApiCapability =
+        body.capability === 'frameo_video'
+          ? 'frameo_video'
+          : body.capability === 'video'
+            ? 'video'
+            : body.capability === 'core'
+              ? 'core'
+              : 'image';
+
+      if (capability === 'frameo_video' && !isAdminReq) {
+        res.status(403).json({
+          error: 'El servicio de video Frameo IA es exclusivo del perfil Administrador.',
+        });
+        return;
+      }
+
       const input: ApiProviderInput & { save?: boolean } = {
         capability,
         providerHint: typeof body.providerHint === 'string' ? body.providerHint : 'auto',
@@ -1121,13 +1129,27 @@ async function startServer() {
   });
 
   app.delete('/api/providers/:capability', (req, res) => {
-    const userId = getRequestUserId(req);
+    const isAdminReq = isVerifiedAdminRequest(req);
+    const userId = isAdminReq ? ADMIN_UID : getRequestUserId(req);
     const capParam = req.params.capability;
-    if (capParam !== 'image' && capParam !== 'video' && capParam !== 'core') {
+    if (
+      capParam !== 'image' &&
+      capParam !== 'video' &&
+      capParam !== 'core' &&
+      capParam !== 'frameo_video'
+    ) {
       res.status(400).json({ error: 'Capacidad de proveedor inválida.' });
       return;
     }
-    const providers = deleteUserProvider(userId, capParam, WORKSPACE_DIR);
+    if (capParam === 'frameo_video' && !isAdminReq) {
+      res.status(403).json({
+        error: 'El servicio de video Frameo IA es exclusivo del perfil Administrador.',
+      });
+      return;
+    }
+    const providers = deleteUserProvider(userId, capParam, WORKSPACE_DIR, {
+      includeAdminFrameo: isAdminReq,
+    });
     res.json({ providers });
   });
 
@@ -1166,6 +1188,43 @@ async function startServer() {
     });
   });
 
+  app.post('/api/admin/google-login', async (req, res) => {
+    try {
+      const idToken = typeof req.body?.idToken === 'string' ? req.body.idToken.trim() : '';
+      if (!idToken) {
+        res.status(400).json({ error: 'Falta el token de verificación de Google.' });
+        return;
+      }
+
+      const verified = await verifyFirebaseGoogleIdToken(idToken, FIREBASE_PROJECT_ID);
+      if (!verified.valid) {
+        res.status(403).json({ error: verified.reason || 'Acceso de Administrador denegado.' });
+        return;
+      }
+
+      const { email } = getConfiguredAdminIdentity();
+      ensureWorkspaceProjects(ADMIN_UID);
+      ensureLearningMemory(ADMIN_UID);
+      ensureAdminAgentProfile();
+      const token = signAdminToken(ADMIN_UID);
+
+      res.json({
+        token,
+        session: {
+          uid: ADMIN_UID,
+          displayName: verified.name || 'Administrador AUTEUR',
+          email: verified.email || email,
+          role: 'admin',
+          emailVerified: true,
+        },
+      });
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : 'No se pudo verificar el acceso Google Administrador.';
+      res.status(500).json({ error: message });
+    }
+  });
+
   app.post('/api/admin/seed-audit-project', requireAdminAuth, (req: AdminAuthenticatedRequest, res) => {
     const userId = req.adminUid || ADMIN_UID;
     const existing = ensureWorkspaceProjects(userId);
@@ -1186,36 +1245,246 @@ async function startServer() {
     const userId = req.adminUid || ADMIN_UID;
     const profile = ensureAdminAgentProfile();
     const lessons = ensureLearningMemory(userId);
+    const providers = listPublicProviders(userId, WORKSPACE_DIR, { includeAdminFrameo: true });
+    const frameoMcpStatus = getFrameoMcpPublicStatus(userId, WORKSPACE_DIR);
     res.json({
       profile,
+      providers,
+      frameoMcpStatus,
       baseSystemInstruction: PRODUCER_SYSTEM_INSTRUCTION,
-      effectiveSystemInstruction: buildEffectiveProducerInstruction(lessons),
+      effectiveSystemInstruction: buildEffectiveProducerInstruction(lessons, { isAdmin: true }),
       learningCount: lessons.length,
       learningPreview: buildLearningPromptContext(lessons, 8),
       activeModels: [
         { role: 'Agente Arthur (Director / Guionista / Crítico)', model: 'gemini-4-hydrogen' },
         {
-          role: 'Generador de Imágenes (Configurable Free/Pago)',
-          model: (() => {
-            const imgProv = resolveProviderForCapability(userId, 'image', WORKSPACE_DIR);
-            return imgProv.configured
-              ? `${imgProv.label} (${imgProv.model || imgProv.tier})`
-              : 'Sin asignar (suministrable por usuario)';
-          })(),
+          role: 'Motor de Producción Administrador',
+          model:
+            profile.frameoIaEnabled !== false
+              ? `Frameo IA · ${profile.frameoIaModel || 'Veo 3.1 Rápido'} (${profile.frameoIaAspectRatio || '16:9'})`
+              : 'Modo Estándar AUTEUR',
         },
         {
-          role: 'Generador de Video (Configurable Free/Pago)',
-          model: (() => {
-            const vidProv = resolveProviderForCapability(userId, 'video', WORKSPACE_DIR);
-            return vidProv.configured
-              ? `${vidProv.label} (${vidProv.model || vidProv.tier})`
-              : 'Sin asignar (suministrable por usuario)';
-          })(),
+          role: 'Servicio Video Frameo IA (Admin)',
+          model: providers.frameo_video.configured
+            ? `${providers.frameo_video.label} (${providers.frameo_video.model || providers.frameo_video.tier})`
+            : 'Sin conector Frameo IA activo (usa respaldo manual si falla)',
+        },
+        {
+          role: 'Generador de Imágenes (Configurable Free/Pago)',
+          model: providers.image.configured
+            ? `${providers.image.label} (${providers.image.model || providers.image.tier})`
+            : 'Sin asignar (suministrable por usuario)',
+        },
+        {
+          role: 'Generador de Video Manual / Estándar (Free/Pago)',
+          model: providers.video.configured
+            ? `${providers.video.label} (${providers.video.model || providers.video.tier})`
+            : 'Sin asignar (suministrable manualmente)',
         },
         { role: 'Voces en Off Realistas', model: 'gemini-3.8-flash-tts' },
         { role: 'Transcripción de Audio / Dictado', model: 'gemini-3.5-transcribe' },
         { role: 'Música Original Tráiler 30s', model: 'lyria-3-clip-preview' },
       ],
+    });
+  });
+
+  function resolveFrameoOAuthRedirectUri(req: express.Request): string {
+    const envAppUrl = (process.env.APP_URL || '').trim().replace(/\/+$/, '');
+    if (envAppUrl) {
+      return `${envAppUrl}/api/admin/frameo-mcp/callback`;
+    }
+    const rawOrigin = typeof req.query?.origin === 'string' ? req.query.origin.trim() : '';
+    if (rawOrigin) {
+      try {
+        const parsed = new URL(rawOrigin);
+        if (
+          (parsed.protocol === 'https:' && parsed.hostname.endsWith('.run.app')) ||
+          ((parsed.protocol === 'http:' || parsed.protocol === 'https:') &&
+            (parsed.hostname === 'localhost' || parsed.hostname === '127.0.0.1'))
+        ) {
+          return `${parsed.origin}/api/admin/frameo-mcp/callback`;
+        }
+      } catch {
+        // Ignore malformed origin query
+      }
+    }
+    const forwardedHost = String(req.headers['x-forwarded-host'] || req.headers.host || '').split(',')[0].trim();
+    const forwardedProto = String(req.headers['x-forwarded-proto'] || req.protocol || 'http').split(',')[0].trim();
+    if (
+      forwardedHost &&
+      (forwardedHost.endsWith('.run.app') ||
+        forwardedHost.startsWith('localhost') ||
+        forwardedHost.startsWith('127.0.0.1'))
+    ) {
+      const proto = forwardedHost.endsWith('.run.app') ? 'https' : forwardedProto;
+      return `${proto}://${forwardedHost}/api/admin/frameo-mcp/callback`;
+    }
+    return `http://localhost:${PORT}/api/admin/frameo-mcp/callback`;
+  }
+
+  app.get('/api/admin/frameo-mcp/auth-url', requireAdminAuth, async (req: AdminAuthenticatedRequest, res) => {
+    try {
+      const userId = req.adminUid || ADMIN_UID;
+      const mcpUrl =
+        typeof req.query?.mcpUrl === 'string' && req.query.mcpUrl.trim()
+          ? req.query.mcpUrl.trim()
+          : DEFAULT_FRAMEO_MCP_URL;
+      const redirectUri = resolveFrameoOAuthRedirectUri(req);
+      const authData = await createFrameoOAuthAuthorizationUrl({
+        userId,
+        redirectUri,
+        mcpUrl,
+        workspaceDir: WORKSPACE_DIR,
+      });
+      res.json(authData);
+    } catch (error) {
+      const msg =
+        error instanceof Error
+          ? error.message
+          : 'No se pudo iniciar la autorización OAuth con Frameo.AI MCP.';
+      res.status(502).json({ error: msg });
+    }
+  });
+
+  const handleFrameoMcpCallback = async (req: express.Request, res: express.Response) => {
+    const oauthError = typeof req.query?.error === 'string' ? req.query.error : '';
+    const oauthErrorDesc =
+      typeof req.query?.error_description === 'string' ? req.query.error_description : '';
+    const code = typeof req.query?.code === 'string' ? req.query.code.trim() : '';
+    const state = typeof req.query?.state === 'string' ? req.query.state.trim() : '';
+
+    if (oauthError) {
+      const msg = oauthErrorDesc || oauthError || 'Autorización denegada en Frameo.AI.';
+      res.status(400).send(`<!DOCTYPE html>
+<html lang="es"><body style="font-family:sans-serif;background:#0b0b0e;color:#f2f0eb;padding:24px;">
+  <h3>Error conectando con Frameo.AI</h3>
+  <p>${msg.replace(/[<>&"]/g, '')}</p>
+  <script>
+    if (window.opener) {
+      window.opener.postMessage(${JSON.stringify({ type: 'FRAMEO_MCP_OAUTH_ERROR', error: msg })}, '*');
+    }
+  </script>
+</body></html>`);
+      return;
+    }
+
+    if (!code || !state) {
+      res.status(400).send('Faltan parámetros OAuth (code / state).');
+      return;
+    }
+
+    try {
+      const adminProfile = ensureAdminAgentProfile();
+      const done = await completeFrameoOAuthCallback({ code, state });
+      const providers = saveConnectedFrameoMcpProvider(
+        done.userId,
+        {
+          mcpUrl: done.mcpUrl,
+          model: adminProfile.frameoIaModel || 'Veo 3.1 Rápido',
+          toolsCount: done.tools.length,
+          serverName: done.serverName,
+        },
+        WORKSPACE_DIR
+      );
+
+      const payload = {
+        type: 'FRAMEO_MCP_OAUTH_SUCCESS',
+        toolsCount: done.tools.length,
+        serverName: done.serverName || 'Frameo.AI MCP',
+        providers,
+      };
+      res.send(`<!DOCTYPE html>
+<html lang="es"><body style="font-family:sans-serif;background:#0b0b0e;color:#f2f0eb;padding:24px;">
+  <h3>Frameo.AI MCP conectado correctamente</h3>
+  <p>Herramientas detectadas: ${done.tools.length}. Esta ventana se cerrará automáticamente.</p>
+  <script>
+    if (window.opener) {
+      window.opener.postMessage(${JSON.stringify(payload)}, '*');
+      window.close();
+    } else {
+      window.location.href = '/';
+    }
+  </script>
+</body></html>`);
+    } catch (error) {
+      const msg =
+        error instanceof Error ? error.message : 'Error completando OAuth con Frameo.AI.';
+      res.status(502).send(`<!DOCTYPE html>
+<html lang="es"><body style="font-family:sans-serif;background:#0b0b0e;color:#f2f0eb;padding:24px;">
+  <h3>Error completando conexión Frameo.AI</h3>
+  <p>${msg.replace(/[<>&"]/g, '')}</p>
+  <script>
+    if (window.opener) {
+      window.opener.postMessage(${JSON.stringify({ type: 'FRAMEO_MCP_OAUTH_ERROR', error: msg })}, '*');
+    }
+  </script>
+</body></html>`);
+    }
+  };
+
+  app.get(['/api/admin/frameo-mcp/callback', '/api/admin/frameo-mcp/callback/'], handleFrameoMcpCallback);
+
+  app.get('/api/admin/frameo-mcp/status', requireAdminAuth, (req: AdminAuthenticatedRequest, res) => {
+    const userId = req.adminUid || ADMIN_UID;
+    const status = getFrameoMcpPublicStatus(userId, WORKSPACE_DIR);
+    const providers = listPublicProviders(userId, WORKSPACE_DIR, { includeAdminFrameo: true });
+    res.json({ status, providers });
+  });
+
+  app.post('/api/admin/frameo-mcp/refresh-tools', requireAdminAuth, async (req: AdminAuthenticatedRequest, res) => {
+    try {
+      const userId = req.adminUid || ADMIN_UID;
+      const adminProfile = ensureAdminAgentProfile();
+      const synced = await listFrameoMcpTools(userId, WORKSPACE_DIR);
+      const providers = saveConnectedFrameoMcpProvider(
+        userId,
+        {
+          model: adminProfile.frameoIaModel || 'Veo 3.1 Rápido',
+          toolsCount: synced.tools.length,
+          serverName: synced.serverName,
+        },
+        WORKSPACE_DIR
+      );
+      const status = getFrameoMcpPublicStatus(userId, WORKSPACE_DIR);
+      res.json({ status, providers, tools: synced.tools });
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : 'No se pudieron sincronizar las herramientas MCP de Frameo.AI.';
+      res.status(502).json({ error: msg });
+    }
+  });
+
+  app.post('/api/admin/frameo-mcp/call-tool', requireAdminAuth, async (req: AdminAuthenticatedRequest, res) => {
+    try {
+      const userId = req.adminUid || ADMIN_UID;
+      const toolName = typeof req.body?.toolName === 'string' ? req.body.toolName.trim() : '';
+      const args =
+        req.body?.arguments && typeof req.body.arguments === 'object'
+          ? (req.body.arguments as Record<string, unknown>)
+          : {};
+      if (!toolName) {
+        res.status(400).json({ error: 'Debes indicar toolName para invocar Frameo.AI MCP.' });
+        return;
+      }
+      const result = await callFrameoMcpTool(userId, toolName, args, WORKSPACE_DIR);
+      res.json({ ok: true, result });
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : 'Error invocando herramienta de Frameo.AI MCP.';
+      res.status(502).json({ error: msg });
+    }
+  });
+
+  app.delete('/api/admin/frameo-mcp/disconnect', requireAdminAuth, (req: AdminAuthenticatedRequest, res) => {
+    const userId = req.adminUid || ADMIN_UID;
+    disconnectFrameoMcpSession(userId, WORKSPACE_DIR);
+    const current = resolveProviderForCapability(userId, 'frameo_video', WORKSPACE_DIR);
+    const providers =
+      current.providerKind === 'frameo_mcp'
+        ? deleteUserProvider(userId, 'frameo_video', WORKSPACE_DIR, { includeAdminFrameo: true })
+        : listPublicProviders(userId, WORKSPACE_DIR, { includeAdminFrameo: true });
+    res.json({
+      status: getFrameoMcpPublicStatus(userId, WORKSPACE_DIR),
+      providers,
     });
   });
 
@@ -1230,6 +1499,7 @@ async function startServer() {
     }
 
     const current = ensureAdminAgentProfile();
+    const rawClipDuration = Number(body.frameoIaClipDurationSec);
     const saved = saveAdminAgentProfile({
       ...current,
       strictContinuityMode:
@@ -1244,6 +1514,40 @@ async function startServer() {
         typeof body.targetAudienceTone === 'string' && body.targetAudienceTone.trim()
           ? body.targetAudienceTone.trim()
           : current.targetAudienceTone,
+      frameoIaEnabled:
+        typeof body.frameoIaEnabled === 'boolean'
+          ? body.frameoIaEnabled
+          : current.frameoIaEnabled,
+      frameoIaAutoGenerateVideo:
+        typeof body.frameoIaAutoGenerateVideo === 'boolean'
+          ? body.frameoIaAutoGenerateVideo
+          : current.frameoIaAutoGenerateVideo,
+      frameoIaModel:
+        typeof body.frameoIaModel === 'string' && body.frameoIaModel.trim()
+          ? body.frameoIaModel.trim()
+          : current.frameoIaModel,
+      frameoIaVfxMode:
+        typeof body.frameoIaVfxMode === 'string' && body.frameoIaVfxMode.trim()
+          ? body.frameoIaVfxMode.trim()
+          : current.frameoIaVfxMode,
+      frameoIaRenderQuality:
+        body.frameoIaRenderQuality === 'full_hd'
+          ? 'full_hd'
+          : body.frameoIaRenderQuality === '480p_preview'
+            ? '480p_preview'
+            : current.frameoIaRenderQuality,
+      frameoIaStylePreset:
+        typeof body.frameoIaStylePreset === 'string' && body.frameoIaStylePreset.trim()
+          ? body.frameoIaStylePreset.trim()
+          : current.frameoIaStylePreset,
+      frameoIaAspectRatio:
+        typeof body.frameoIaAspectRatio === 'string' && body.frameoIaAspectRatio.trim()
+          ? body.frameoIaAspectRatio.trim()
+          : current.frameoIaAspectRatio,
+      frameoIaClipDurationSec:
+        Number.isFinite(rawClipDuration) && rawClipDuration >= 3 && rawClipDuration <= 12
+          ? Math.round(rawClipDuration)
+          : current.frameoIaClipDurationSec,
       customDirectives: customDirectives.trim(),
       updatedAt: new Date().toISOString(),
     });
@@ -1251,8 +1555,320 @@ async function startServer() {
 
     res.json({
       profile: saved,
-      effectiveSystemInstruction: buildEffectiveProducerInstruction(lessons),
+      effectiveSystemInstruction: buildEffectiveProducerInstruction(lessons, { isAdmin: true }),
     });
+  });
+
+  app.post('/api/admin/generate-frameo-package', requireAdminAuth, (req: AdminAuthenticatedRequest, res) => {
+    const userId = req.adminUid || ADMIN_UID;
+    const { projectId, sequenceId } = req.body ?? {};
+    const pid = String(projectId || '').trim();
+    const sid = String(sequenceId || '').trim();
+
+    if (!pid || !sid) {
+      res.status(400).json({ error: 'Selecciona un proyecto y una secuencia para generar el paquete Frameo IA.' });
+      return;
+    }
+
+    const project = readProjectById(userId, pid);
+    if (!project) {
+      res.status(404).json({ error: 'Proyecto no encontrado.' });
+      return;
+    }
+    const seqIdx = project.sequences.findIndex((s) => s.id === sid);
+    if (seqIdx === -1) {
+      res.status(404).json({ error: 'Secuencia no encontrada.' });
+      return;
+    }
+
+    const profile = ensureAdminAgentProfile();
+    const currentSeq = project.sequences[seqIdx];
+    const frameoSpec = buildFrameoProductionSpecForSequence({
+      project,
+      sequence: currentSeq,
+      profile,
+    });
+    const updatedSeq: ProductionSequence = {
+      ...currentSeq,
+      productionEngine: 'frameo_ia',
+      frameoProductionSpec: frameoSpec,
+      updatedAt: new Date().toISOString(),
+    };
+    const updatedProject: ProductionProject = {
+      ...project,
+      sequences: project.sequences.map((s, idx) => (idx === seqIdx ? updatedSeq : s)),
+      updatedAt: new Date().toISOString(),
+    };
+    writeProjectFolder(userId, updatedProject);
+
+    res.json({
+      project: updatedProject,
+      sequence: updatedSeq,
+      frameoProductionSpec: frameoSpec,
+    });
+  });
+
+  // Admin-only Frameo IA Video Generation Service (strictly uses 'frameo_video' configuration)
+  app.post('/api/admin/generate-frameo-video', requireAdminAuth, async (req: AdminAuthenticatedRequest, res) => {
+    try {
+      const userId = req.adminUid || ADMIN_UID;
+      const {
+        projectId,
+        sequenceId,
+        frameId,
+        prompt,
+        aspectRatio,
+        duration,
+        imageUrl,
+        asyncJob,
+      } = req.body ?? {};
+
+      const pid = String(projectId || '').trim();
+      const sid = String(sequenceId || '').trim();
+      const fid = String(frameId || '').trim();
+      const incomingPrompt = String(prompt || '').trim();
+
+      if (!pid || !sid) {
+        res.status(400).json({
+          error: 'Se requiere projectId y sequenceId para generar el video en Frameo IA.',
+          frameoFailed: true,
+          needsManualApiConfig: true,
+        });
+        return;
+      }
+
+      const initialProject = readProjectById(userId, pid);
+      if (!initialProject) {
+        res.status(404).json({
+          error: 'Proyecto no encontrado para el perfil Administrador.',
+          frameoFailed: true,
+          needsManualApiConfig: true,
+        });
+        return;
+      }
+
+      const targetSeq = initialProject.sequences.find((s) => s.id === sid);
+      if (!targetSeq) {
+        res.status(404).json({
+          error: 'Secuencia no encontrada en el proyecto del Administrador.',
+          frameoFailed: true,
+          needsManualApiConfig: true,
+        });
+        return;
+      }
+
+      const adminProfile = ensureAdminAgentProfile();
+      const frameoProvider = resolveProviderForCapability(userId, 'frameo_video', WORKSPACE_DIR);
+      if (!frameoProvider.configured || !frameoProvider.providerKind) {
+        res.status(428).json({
+          error:
+            'El servicio de generación de video de Frameo IA no está configurado en la configuración del Administrador. Configura Frameo IA o suministra manualmente una API de generación.',
+          frameoFailed: true,
+          needsManualApiConfig: true,
+          capability: 'frameo_video',
+        });
+        return;
+      }
+
+      const firstScene = targetSeq.frameoProductionSpec?.scenes?.[0];
+      const fallbackFrame = targetSeq.storyboardFrames?.[0];
+      const motionPrompt =
+        incomingPrompt ||
+        (firstScene
+          ? `${firstScene.frameoMotionPrompt} (${firstScene.frameoVisualPrompt})`
+          : fallbackFrame
+            ? `${fallbackFrame.veoMotionPrompt} (${fallbackFrame.visualPrompt})`
+            : targetSeq.hyperRealisticPrompt || targetSeq.directorVision || targetSeq.logline);
+
+      if (!motionPrompt || motionPrompt.length < 5) {
+        res.status(400).json({
+          error: 'No hay prompt visual/movimiento válido para ejecutar Frameo IA.',
+          frameoFailed: true,
+          needsManualApiConfig: true,
+        });
+        return;
+      }
+
+      const rawRatio = String(
+        aspectRatio || targetSeq.aspectRatio || adminProfile.frameoIaAspectRatio || '16:9'
+      ).trim();
+      const cleanRatio = rawRatio === '9:16' || rawRatio === '3:4' ? '9:16' : '16:9';
+      const defaultSec = Math.min(
+        10,
+        Math.max(3, Math.round(adminProfile.frameoIaClipDurationSec || 5))
+      );
+      const videoDuration =
+        typeof duration === 'string' && /^(3|4|5|6|7|8|9|10)s$/.test(duration)
+          ? duration
+          : `${defaultSec}s`;
+
+      const sourceImage = resolveLocalImageBase64(
+        typeof imageUrl === 'string' ? imageUrl : fallbackFrame?.imageUrl
+      );
+
+      async function persistFrameoVideoBuffer(
+        buffer: Buffer,
+        mimeType: string,
+        providerLabel: string
+      ): Promise<{ videoUrl: string; project: ProductionProject }> {
+        let latestProject = readProjectById(userId, pid) || initialProject!;
+        const saved = saveGeneratedAssetBuffer(userId, latestProject, {
+          baseName: `frameo-${sid}-${fid || 'seq'}`,
+          ext: mimeType.includes('webm') ? '.webm' : '.mp4',
+          mimeType,
+          buffer,
+          kind: 'video',
+        });
+        latestProject = saved.updatedProject;
+
+        const seqIdx = latestProject.sequences.findIndex((s) => s.id === sid);
+        if (seqIdx !== -1) {
+          const seq = latestProject.sequences[seqIdx];
+          const targetFrameId = fid || seq.storyboardFrames?.[0]?.id;
+          let updatedFrames: StoryboardCard[];
+          if (targetFrameId && seq.storyboardFrames.some((fr) => fr.id === targetFrameId)) {
+            updatedFrames = seq.storyboardFrames.map((fr) =>
+              fr.id === targetFrameId ? { ...fr, videoUrl: saved.asset.url } : fr
+            );
+          } else {
+            const newCard: StoryboardCard = {
+              id: `sb-frameo-${Date.now().toString(36)}`,
+              title: `Frameo IA · ${seq.title} (${cleanRatio} · ${videoDuration})`,
+              shotRef: firstScene?.shotRef || 'Frameo Clip 01',
+              aspectRatio: cleanRatio,
+              cameraSpec: `${seq.cameraSystem} · ${providerLabel}`,
+              videoUrl: saved.asset.url,
+              visualPrompt: motionPrompt,
+              veoMotionPrompt: motionPrompt,
+            };
+            updatedFrames = [newCard, ...(seq.storyboardFrames || [])];
+          }
+
+          latestProject = {
+            ...latestProject,
+            sequences: latestProject.sequences.map((s, idx) =>
+              idx === seqIdx
+                ? {
+                    ...s,
+                    productionEngine: 'frameo_ia',
+                    storyboardFrames: updatedFrames,
+                    updatedAt: new Date().toISOString(),
+                  }
+                : s
+            ),
+            updatedAt: new Date().toISOString(),
+          };
+          writeProjectFolder(userId, latestProject);
+        }
+
+        return { videoUrl: saved.asset.url, project: latestProject };
+      }
+
+      if (asyncJob === false) {
+        const result = await executeVideoGeneration(
+          userId,
+          {
+            prompt: motionPrompt,
+            aspectRatio: cleanRatio,
+            duration: videoDuration,
+            sourceImage,
+            capability: 'frameo_video',
+            model: adminProfile.frameoIaModel,
+            vfxMode: adminProfile.frameoIaVfxMode,
+            renderQuality: adminProfile.frameoIaRenderQuality,
+          },
+          WORKSPACE_DIR
+        );
+        const done = await persistFrameoVideoBuffer(
+          result.buffer,
+          result.mimeType,
+          result.providerLabel
+        );
+        res.json({
+          status: 'completed',
+          videoUrl: done.videoUrl,
+          model: result.model,
+          provider: result.providerLabel,
+          tier: result.tier,
+          project: done.project,
+        });
+        return;
+      }
+
+      const jobId = `fjob-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
+      const jobRecord: VideoJobState = {
+        jobId,
+        userId,
+        projectId: pid,
+        capability: 'frameo_video',
+        status: 'pending',
+        createdAt: Date.now(),
+      };
+      videoJobs.set(jobId, jobRecord);
+
+      void (async () => {
+        try {
+          const result = await executeVideoGeneration(
+            userId,
+            {
+              prompt: motionPrompt,
+              aspectRatio: cleanRatio,
+              duration: videoDuration,
+              sourceImage,
+              capability: 'frameo_video',
+              model: adminProfile.frameoIaModel,
+              vfxMode: adminProfile.frameoIaVfxMode,
+              renderQuality: adminProfile.frameoIaRenderQuality,
+            },
+            WORKSPACE_DIR
+          );
+          const done = await persistFrameoVideoBuffer(
+            result.buffer,
+            result.mimeType,
+            result.providerLabel
+          );
+          videoJobs.set(jobId, {
+            ...jobRecord,
+            status: 'completed',
+            videoUrl: done.videoUrl,
+            project: done.project,
+          });
+        } catch (bgErr) {
+          const classifiedBg = classifyGeminiApiError(
+            bgErr,
+            'El servicio de generación de video Frameo IA falló al renderizar.'
+          );
+          videoJobs.set(jobId, {
+            ...jobRecord,
+            status: 'failed',
+            error: classifiedBg.message,
+            frameoFailed: true,
+            needsManualApiConfig: true,
+          });
+        }
+      })();
+
+      res.status(202).json({
+        jobId,
+        status: 'pending',
+        capability: 'frameo_video',
+        model: frameoProvider.model || frameoProvider.label,
+        provider: frameoProvider.label,
+        tier: frameoProvider.tier,
+      });
+    } catch (error) {
+      const classified = classifyGeminiApiError(
+        error,
+        'El servicio de generación de video de Frameo IA falló.'
+      );
+      logClassifiedRouteError('/api/admin/generate-frameo-video', classified);
+      res.status(classified.status).json({
+        error: classified.message,
+        frameoFailed: true,
+        needsManualApiConfig: true,
+        capability: 'frameo_video',
+      });
+    }
   });
 
   app.post('/api/admin/analyze-sequence', requireAdminAuth, async (req: AdminAuthenticatedRequest, res) => {
@@ -1926,18 +2542,22 @@ Evalúa con rigor técnico de Hollywood:
 
   // Poll background video job
   app.get('/api/video-jobs/:jobId', (req, res) => {
-    const userId = getRequestUserId(req);
+    const isAdminReq = isVerifiedAdminRequest(req);
+    const userId = isAdminReq ? ADMIN_UID : getRequestUserId(req);
     const job = videoJobs.get(req.params.jobId);
-    if (!job || job.userId !== userId) {
+    if (!job || (job.userId !== userId && !(isAdminReq && job.userId === ADMIN_UID))) {
       res.status(404).json({ error: 'Trabajo de video no encontrado.' });
       return;
     }
     res.json({
       jobId: job.jobId,
+      capability: job.capability,
       status: job.status,
       videoUrl: job.videoUrl,
       project: job.project,
       error: job.error,
+      frameoFailed: job.frameoFailed,
+      needsManualApiConfig: job.needsManualApiConfig,
     });
   });
 
@@ -2549,6 +3169,9 @@ Devuelve entre 2 y 12 capítulos ordenados cronológicamente (index: 1, 2, 3...)
         }
       }
 
+      const isAdminProd = isVerifiedAdminRequest(req);
+      const adminProfile = ensureAdminAgentProfile();
+      const useFrameoIa = isAdminProd && adminProfile.frameoIaEnabled !== false;
       const lessons = ensureLearningMemory(userId);
       const learningContext = buildLearningPromptContext(lessons, 8);
       const resolutionSpec = buildHyperRealisticResolutionSpec(targetResolution);
@@ -2566,6 +3189,11 @@ ${chapterSummary ? `Sinopsis del capítulo a adaptar: ${chapterSummary}` : ''}
 Extrae e interpreta exclusivamente los acontecimientos, diálogos, escenografía y ritmo de este capítulo manteniendo continuidad exacta con los capítulos anteriores.`
         : '';
 
+      const frameoAdminDirective = useFrameoIa
+        ? `\nMOTOR DE PRODUCCIÓN ADMINISTRADOR: FRAMEO IA (${adminProfile.frameoIaStylePreset || 'Frameo IA Cinema 4K'} · clips de ${adminProfile.frameoIaClipDurationSec || 5}s):
+Genera todos los prompts visuales, movimientos de cámara, continuidad de personajes y bloques de narración/diálogo optimizados para producción directa en Frameo IA.`
+        : '';
+
       const promptText = `PRODUCCIÓN ACTIVA: ${project.title}
 SECUENCIA / CAPÍTULO: ${sequenceTitle}
 TIPO DE MATERIAL FUENTE: ${sourceType === 'audiobook' ? 'Audiolibro / Relato Narrado' : sourceType === 'book' ? 'Libro / Manuscrito Literario' : 'Historia Original / Sinopsis'}
@@ -2573,6 +3201,7 @@ ESTILO CINEMATOGRÁFICO OBJETIVO: ${directorStyle}
 RELACIÓN DE ASPECTO OBJETIVO: ${aspectRatio}
 RESOLUCIÓN Y ULTRA DEFINICIÓN OBJETIVO: ${targetResolution} (${resolutionSpec})
 ${chapterDirective}
+${frameoAdminDirective}
 
 MEMORIA DE AUTOAPRENDIZAJE Y MEJORA DEL ESTUDIO:
 ${learningContext}
@@ -2597,7 +3226,7 @@ Genera el expediente completo de dirección en JSON estructurado siguiendo el es
         model: 'gemini-4-hydrogen',
         contents: { parts },
         config: {
-          systemInstruction: buildEffectiveProducerInstruction(lessons),
+          systemInstruction: buildEffectiveProducerInstruction(lessons, { isAdmin: isAdminProd }),
           responseMimeType: 'application/json',
           responseSchema: PRODUCTION_RESPONSE_SCHEMA,
           thinkingConfig: {
@@ -2685,9 +3314,18 @@ Genera el expediente completo de dirección en JSON estructurado siguiendo el es
             }))
           : [],
         continuitySummary: parsed.continuitySummary || '',
+        productionEngine: useFrameoIa ? 'frameo_ia' : 'standard',
         createdAt: now,
         updatedAt: now,
       };
+
+      if (useFrameoIa) {
+        createdSequence.frameoProductionSpec = buildFrameoProductionSpecForSequence({
+          project,
+          sequence: createdSequence,
+          profile: adminProfile,
+        });
+      }
 
       const updatedBible = buildContinuationContext(
         continuityBible || project.continuityBible,
@@ -2942,7 +3580,9 @@ INSTRUCCIONES DE MONTAJE DE 30 SEGUNDOS:
 4. Redacta un "voiceOverScript" completo en español que dure ~22-26 segundos hablados y coordina las líneas por beat ("voiceOverLine") y rótulos en pantalla ("onScreenTitleCard") junto con "sfxCue" y "editingTransition" (ej. Smash Cut, LFE Boom, Riser).
 5. En "musicPrompt", describe en inglés la partitura cinematográfica de 30 segundos para Lyria (tempo, instrumentación, crescendo y clímax en el segundo 24).`,
         config: {
-          systemInstruction: buildEffectiveProducerInstruction(ensureLearningMemory(userId)),
+          systemInstruction: buildEffectiveProducerInstruction(ensureLearningMemory(userId), {
+            isAdmin: isVerifiedAdminRequest(req),
+          }),
           responseMimeType: 'application/json',
           responseSchema: TRAILER_RESPONSE_SCHEMA,
           thinkingConfig: { thinkingLevel: ThinkingLevel.HIGH },
@@ -3175,7 +3815,9 @@ REQUISITOS OBLIGATORIOS PARA LOS 4 FRAMES:
         model: 'gemini-4-hydrogen',
         contents: directorPrompt,
         config: {
-          systemInstruction: buildEffectiveProducerInstruction(lessons),
+          systemInstruction: buildEffectiveProducerInstruction(lessons, {
+            isAdmin: isVerifiedAdminRequest(req),
+          }),
           responseMimeType: 'application/json',
           responseSchema: STORYBOARD_4_FRAMES_SCHEMA,
           thinkingConfig: { thinkingLevel: ThinkingLevel.HIGH },

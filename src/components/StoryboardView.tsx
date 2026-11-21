@@ -26,6 +26,7 @@ interface StoryboardViewProps {
   projectId: string;
   sequence: ProductionSequence;
   defaultResolution?: ResolutionTier;
+  adminToken?: string | null;
   providersStatus?: Record<ApiCapability, ApiProviderPublicSummary> | null;
   onEnsureProjectSynced: () => Promise<void>;
   onProjectMediaUpdated: (project: ProductionProject) => Promise<void>;
@@ -37,6 +38,7 @@ export function StoryboardView({
   projectId,
   sequence,
   defaultResolution = '4K',
+  adminToken,
   providersStatus,
   onEnsureProjectSynced,
   onProjectMediaUpdated,
@@ -73,7 +75,12 @@ export function StoryboardView({
 
   useEffect(() => {
     let cancelled = false;
-    fetch('/api/providers', { headers: { 'x-user-id': userId } })
+    fetch('/api/providers', {
+      headers: {
+        'x-user-id': userId,
+        ...(adminToken ? { Authorization: `Bearer ${adminToken}` } : {}),
+      },
+    })
       .then((r) => (r.ok ? r.json() : null))
       .then((d: { providers?: Record<ApiCapability, ApiProviderPublicSummary> } | null) => {
         if (!cancelled && d?.providers) {
@@ -84,10 +91,13 @@ export function StoryboardView({
     return () => {
       cancelled = true;
     };
-  }, [userId]);
+  }, [userId, adminToken]);
 
   const activeImgProv = localProviders?.image;
-  const activeVidProv = localProviders?.video;
+  const activeVidProv =
+    adminToken && localProviders?.frameo_video?.configured
+      ? localProviders.frameo_video
+      : localProviders?.video;
 
   const frames = sequence.storyboardFrames || [];
   const activeCard: StoryboardCard | null =
@@ -122,7 +132,10 @@ export function StoryboardView({
     for (let attempt = 0; attempt < 95; attempt++) {
       await new Promise((resolve) => setTimeout(resolve, 2500));
       const res = await fetch(`/api/video-jobs/${encodeURIComponent(jobId)}`, {
-        headers: { 'x-user-id': userId },
+        headers: {
+          'x-user-id': userId,
+          ...(adminToken ? { Authorization: `Bearer ${adminToken}` } : {}),
+        },
       });
       const data = await parseApiResponse<{
         status: 'pending' | 'completed' | 'failed';
@@ -142,11 +155,14 @@ export function StoryboardView({
 
   async function runVideoGeneration(payload: Record<string, unknown>, targetFrameId?: string) {
     await onEnsureProjectSynced();
-    const res = await fetch('/api/generate-video', {
+    const useFrameoService = Boolean(adminToken && localProviders?.frameo_video?.configured);
+    const endpoint = useFrameoService ? '/api/admin/generate-frameo-video' : '/api/generate-video';
+    const res = await fetch(endpoint, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         'x-user-id': userId,
+        ...(adminToken ? { Authorization: `Bearer ${adminToken}` } : {}),
       },
       body: JSON.stringify({ ...payload, asyncJob: true }),
     });
@@ -181,6 +197,7 @@ export function StoryboardView({
         headers: {
           'Content-Type': 'application/json',
           'x-user-id': userId,
+          ...(adminToken ? { Authorization: `Bearer ${adminToken}` } : {}),
         },
         body: JSON.stringify({
           projectId,

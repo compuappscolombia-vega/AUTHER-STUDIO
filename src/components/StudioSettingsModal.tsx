@@ -1,6 +1,9 @@
 import { useEffect, useState } from 'react';
 import {
+  AlertTriangle,
   CheckCircle2,
+  Clapperboard,
+  ExternalLink,
   Film,
   Image as ImageIcon,
   KeyRound,
@@ -29,6 +32,7 @@ import {
 } from '../utils/productionPipeline';
 import { ASPECT_RATIO_OPTIONS, DIRECTOR_STYLES } from '../utils/studioLogic';
 import {
+  FRAMEO_VIDEO_PROVIDER_PRESETS,
   IMAGE_PROVIDER_PRESETS,
   VIDEO_PROVIDER_PRESETS,
   type ProviderPresetOption,
@@ -38,10 +42,14 @@ import { parseApiResponse } from '../utils/apiClient';
 interface StudioSettingsModalProps {
   open: boolean;
   userId?: string;
+  isAdmin?: boolean;
+  adminToken?: string | null;
+  frameoFailureReason?: string | null;
   settings: StudioSettings;
   onClose: () => void;
   onSaveSettings: (next: StudioSettings) => void;
   onProvidersChanged?: (providers: Record<ApiCapability, ApiProviderPublicSummary>) => void;
+  onRetryWithManualVideoApi?: () => void;
 }
 
 interface ProviderFormState {
@@ -70,10 +78,14 @@ function createInitialProviderForm(summary?: ApiProviderPublicSummary): Provider
 export function StudioSettingsModal({
   open,
   userId = 'default',
+  isAdmin = false,
+  adminToken = null,
+  frameoFailureReason = null,
   settings,
   onClose,
   onSaveSettings,
   onProvidersChanged,
+  onRetryWithManualVideoApi,
 }: StudioSettingsModalProps) {
   const [draft, setDraft] = useState<StudioSettings>(settings);
   const [healthLoading, setHealthLoading] = useState(false);
@@ -83,12 +95,19 @@ export function StudioSettingsModal({
   >(null);
   const [imageForm, setImageForm] = useState<ProviderFormState>(createInitialProviderForm());
   const [videoForm, setVideoForm] = useState<ProviderFormState>(createInitialProviderForm());
-  const [testingCap, setTestingCap] = useState<'image' | 'video' | null>(null);
+  const [frameoForm, setFrameoForm] = useState<ProviderFormState>(createInitialProviderForm());
+  const [testingCap, setTestingCap] = useState<'image' | 'video' | 'frameo_video' | null>(null);
+  const [frameoMcpBusy, setFrameoMcpBusy] = useState(false);
+  const [frameoOAuthFallbackUrl, setFrameoOAuthFallbackUrl] = useState<string | null>(null);
   const [providerFeedback, setProviderFeedback] = useState<{
     image?: { ok: boolean; text: string };
     video?: { ok: boolean; text: string };
+    frameo_video?: { ok: boolean; text: string };
   }>({});
   const [savedNotice, setSavedNotice] = useState(false);
+
+  const authHeaders: Record<string, string> =
+    isAdmin && adminToken ? { Authorization: `Bearer ${adminToken}` } : {};
 
   useEffect(() => {
     setDraft(settings);
@@ -100,7 +119,12 @@ export function StudioSettingsModal({
     setHealthLoading(true);
     setProviderFeedback({});
 
-    fetch('/api/health', { headers: { 'x-user-id': userId } })
+    fetch('/api/health', {
+      headers: {
+        'x-user-id': userId,
+        ...authHeaders,
+      },
+    })
       .then((res) => res.json())
       .then(
         (data: {
@@ -114,6 +138,7 @@ export function StudioSettingsModal({
             setProviders(data.providers);
             setImageForm(createInitialProviderForm(data.providers.image));
             setVideoForm(createInitialProviderForm(data.providers.video));
+            setFrameoForm(createInitialProviderForm(data.providers.frameo_video));
           }
         }
       )
@@ -129,22 +154,73 @@ export function StudioSettingsModal({
     function onKeyDown(e: KeyboardEvent) {
       if (e.key === 'Escape') onClose();
     }
+    function onOAuthMessage(event: MessageEvent) {
+      if (!isAdmin || !adminToken) return;
+      const origin = event.origin || '';
+      if (
+        origin !== window.location.origin &&
+        !origin.endsWith('.run.app') &&
+        !origin.includes('localhost')
+      ) {
+        return;
+      }
+      const data = event.data as {
+        type?: string;
+        toolsCount?: number;
+        serverName?: string;
+        providers?: Record<ApiCapability, ApiProviderPublicSummary>;
+        error?: string;
+      } | null;
+      if (!data || typeof data !== 'object') return;
+      if (data.type === 'FRAMEO_MCP_OAUTH_SUCCESS') {
+        setFrameoOAuthFallbackUrl(null);
+        if (data.providers) {
+          setProviders(data.providers);
+          onProvidersChanged?.(data.providers);
+          if (data.providers.frameo_video) {
+            setFrameoForm(createInitialProviderForm(data.providers.frameo_video));
+          }
+        }
+        setProviderFeedback((prev) => ({
+          ...prev,
+          frameo_video: {
+            ok: true,
+            text: `Frameo.AI MCP conectado vía OAuth (${data.toolsCount ?? 0} herramientas sincronizadas).`,
+          },
+        }));
+      } else if (data.type === 'FRAMEO_MCP_OAUTH_ERROR') {
+        setProviderFeedback((prev) => ({
+          ...prev,
+          frameo_video: {
+            ok: false,
+            text: data.error || 'No se pudo completar la autorización OAuth con Frameo.AI.',
+          },
+        }));
+      }
+    }
     window.addEventListener('keydown', onKeyDown);
+    window.addEventListener('message', onOAuthMessage);
     return () => {
       cancelled = true;
       window.removeEventListener('keydown', onKeyDown);
+      window.removeEventListener('message', onOAuthMessage);
     };
-  }, [open, userId, onClose]);
+  }, [open, userId, isAdmin, adminToken, onClose]);
 
   if (!open) return null;
 
   function applyPreset(
-    capability: 'image' | 'video',
+    capability: 'image' | 'video' | 'frameo_video',
     presetId: ApiProviderKind | 'auto',
     presets: ProviderPresetOption[]
   ) {
     const found = presets.find((p) => p.id === presetId);
-    const setter = capability === 'image' ? setImageForm : setVideoForm;
+    const setter =
+      capability === 'image'
+        ? setImageForm
+        : capability === 'frameo_video'
+          ? setFrameoForm
+          : setVideoForm;
     setter((prev) => ({
       ...prev,
       providerHint: presetId,
@@ -162,8 +238,13 @@ export function StudioSettingsModal({
     }));
   }
 
-  async function handleDetectAndSaveProvider(capability: 'image' | 'video') {
-    const form = capability === 'image' ? imageForm : videoForm;
+  async function handleDetectAndSaveProvider(capability: 'image' | 'video' | 'frameo_video') {
+    const form =
+      capability === 'image'
+        ? imageForm
+        : capability === 'frameo_video'
+          ? frameoForm
+          : videoForm;
     setTestingCap(capability);
     setProviderFeedback((prev) => ({ ...prev, [capability]: undefined }));
     try {
@@ -172,6 +253,7 @@ export function StudioSettingsModal({
         headers: {
           'Content-Type': 'application/json',
           'x-user-id': userId,
+          ...authHeaders,
         },
         body: JSON.stringify({
           capability,
@@ -189,12 +271,23 @@ export function StudioSettingsModal({
         summary: ApiProviderPublicSummary;
         providers: Record<ApiCapability, ApiProviderPublicSummary>;
         diagnostics: string;
-      }>(res, `Error verificando la API de ${capability === 'image' ? 'imágenes' : 'video'}`);
+      }>(
+        res,
+        `Error verificando la API de ${
+          capability === 'image'
+            ? 'imágenes'
+            : capability === 'frameo_video'
+              ? 'Frameo IA'
+              : 'video'
+        }`
+      );
 
       setProviders(data.providers);
       onProvidersChanged?.(data.providers);
       if (capability === 'image') {
         setImageForm(createInitialProviderForm(data.providers.image));
+      } else if (capability === 'frameo_video') {
+        setFrameoForm(createInitialProviderForm(data.providers.frameo_video));
       } else {
         setVideoForm(createInitialProviderForm(data.providers.video));
       }
@@ -215,12 +308,26 @@ export function StudioSettingsModal({
     }
   }
 
-  async function handleDisconnectProvider(capability: 'image' | 'video') {
+  async function handleDisconnectProvider(capability: 'image' | 'video' | 'frameo_video') {
     setTestingCap(capability);
     try {
+      if (capability === 'frameo_video' && isAdmin && adminToken) {
+        await fetch('/api/admin/frameo-mcp/disconnect', {
+          method: 'DELETE',
+          headers: {
+            'x-user-id': userId,
+            ...authHeaders,
+          },
+        }).catch(() => null);
+        setFrameoOAuthFallbackUrl(null);
+      }
+
       const res = await fetch(`/api/providers/${capability}`, {
         method: 'DELETE',
-        headers: { 'x-user-id': userId },
+        headers: {
+          'x-user-id': userId,
+          ...authHeaders,
+        },
       });
       const data = await parseApiResponse<{
         providers: Record<ApiCapability, ApiProviderPublicSummary>;
@@ -229,6 +336,8 @@ export function StudioSettingsModal({
       onProvidersChanged?.(data.providers);
       if (capability === 'image') {
         setImageForm(createInitialProviderForm(data.providers.image));
+      } else if (capability === 'frameo_video') {
+        setFrameoForm(createInitialProviderForm(data.providers.frameo_video));
       } else {
         setVideoForm(createInitialProviderForm(data.providers.video));
       }
@@ -249,6 +358,72 @@ export function StudioSettingsModal({
     }
   }
 
+  async function handleConnectFrameoMcpOAuth() {
+    if (!isAdmin || !adminToken) return;
+    setFrameoMcpBusy(true);
+    setFrameoOAuthFallbackUrl(null);
+    setProviderFeedback((prev) => ({ ...prev, frameo_video: undefined }));
+    try {
+      const targetUrl =
+        frameoForm.endpointUrl.trim() && frameoForm.endpointUrl.includes('mcp')
+          ? frameoForm.endpointUrl.trim()
+          : 'https://mcp.frameo.ai/mcp';
+      const qs = new URLSearchParams({
+        mcpUrl: targetUrl,
+        origin: window.location.origin,
+      });
+      const res = await fetch(`/api/admin/frameo-mcp/auth-url?${qs.toString()}`, {
+        headers: {
+          'x-user-id': userId,
+          ...authHeaders,
+        },
+      });
+      const data = await parseApiResponse<{ authUrl?: string }>(
+        res,
+        'No se pudo iniciar la autorización OAuth con Frameo.AI.'
+      );
+      if (!data.authUrl) {
+        throw new Error('Frameo.AI no devolvió una URL de autorización.');
+      }
+      const popup = window.open(
+        data.authUrl,
+        'frameo_mcp_oauth',
+        'width=620,height=740,noopener=no'
+      );
+      if (!popup) {
+        setFrameoOAuthFallbackUrl(data.authUrl);
+        setProviderFeedback((prev) => ({
+          ...prev,
+          frameo_video: {
+            ok: false,
+            text: 'Tu navegador bloqueó la ventana emergente. Usa el enlace directo de Frameo.AI debajo para iniciar sesión.',
+          },
+        }));
+      } else {
+        setProviderFeedback((prev) => ({
+          ...prev,
+          frameo_video: {
+            ok: true,
+            text: 'Completa el inicio de sesión en la ventana de Frameo.AI para conectar el servidor MCP.',
+          },
+        }));
+      }
+    } catch (err) {
+      setProviderFeedback((prev) => ({
+        ...prev,
+        frameo_video: {
+          ok: false,
+          text:
+            err instanceof Error
+              ? err.message
+              : 'Error iniciando sesión OAuth con Frameo.AI MCP.',
+        },
+      }));
+    } finally {
+      setFrameoMcpBusy(false);
+    }
+  }
+
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     onSaveSettings(draft);
@@ -264,7 +439,7 @@ export function StudioSettingsModal({
   }
 
   function renderProviderCard(
-    capability: 'image' | 'video',
+    capability: 'image' | 'video' | 'frameo_video',
     title: string,
     presets: ProviderPresetOption[],
     form: ProviderFormState,
@@ -273,7 +448,12 @@ export function StudioSettingsModal({
     const summary = providers?.[capability];
     const feedback = providerFeedback[capability];
     const isBusy = testingCap === capability;
-    const Icon = capability === 'image' ? ImageIcon : Film;
+    const Icon =
+      capability === 'image'
+        ? ImageIcon
+        : capability === 'frameo_video'
+          ? Clapperboard
+          : Film;
 
     return (
       <div className="p-4 rounded-xl border border-[#DCD6CA] dark:border-white/12 bg-[#FAF8F4] dark:bg-[#0D0D12] space-y-3">
@@ -305,6 +485,40 @@ export function StudioSettingsModal({
             )}
           </div>
         </div>
+
+        {capability === 'frameo_video' && isAdmin && (
+          <div className="p-3 rounded-lg border border-amber-500/35 dark:border-[#E5A93C]/35 bg-amber-50/70 dark:bg-[#16130B] flex flex-wrap items-center justify-between gap-2.5">
+            <div className="space-y-0.5 min-w-0 flex-1">
+              <div className="text-[11px] font-semibold text-[#18181B] dark:text-[#F2F0EB]">
+                Servidor Remoto Oficial Frameo.AI MCP (HTTP Streamable + OAuth)
+              </div>
+              <div className="text-[11px] font-mono-tech text-[#57534E] dark:text-[#9A968E] truncate">
+                https://mcp.frameo.ai/mcp · Veo 3.1 Rápido / Kling O3 / VFX Studio (Agente Manto)
+              </div>
+            </div>
+            <button
+              type="button"
+              disabled={frameoMcpBusy || isBusy}
+              onClick={handleConnectFrameoMcpOAuth}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#E5A93C] hover:bg-[#EDA949] disabled:opacity-60 text-[#0B0B0E] text-xs font-semibold whitespace-nowrap shrink-0"
+            >
+              <ExternalLink className="w-3.5 h-3.5" />
+              <span>
+                {frameoMcpBusy ? 'Preparando OAuth...' : 'Conectar con Frameo.AI (OAuth MCP)'}
+              </span>
+            </button>
+            {frameoOAuthFallbackUrl && (
+              <a
+                href={frameoOAuthFallbackUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="w-full text-[11px] font-medium text-amber-800 dark:text-[#E5A93C] underline break-all"
+              >
+                Abrir autorización oficial de Frameo.AI en nueva pestaña
+              </a>
+            )}
+          </div>
+        )}
 
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <div>
@@ -540,21 +754,70 @@ export function StudioSettingsModal({
             </div>
           </div>
 
-          {/* Flexible Image & Video API Configurators */}
+          {/* Frameo IA Video Fallback Notice */}
+          {frameoFailureReason && (
+            <div
+              role="alert"
+              className="p-4 rounded-xl border border-amber-500/50 dark:border-[#E5A93C]/45 bg-amber-50 dark:bg-[#1E170C] space-y-2.5"
+            >
+              <div className="flex items-start gap-2.5">
+                <AlertTriangle className="w-4 h-4 text-amber-700 dark:text-[#E5A93C] shrink-0 mt-0.5" />
+                <div className="space-y-1 flex-1 min-w-0">
+                  <div className="text-xs font-semibold text-[#18181B] dark:text-[#F2F0EB]">
+                    El servicio de video Frameo IA no pudo completar la generación
+                  </div>
+                  <p className="text-xs text-[#3F3F46] dark:text-[#D4CFC7] leading-relaxed">
+                    {frameoFailureReason}
+                  </p>
+                  <p className="text-[11px] text-[#57534E] dark:text-[#9A968E]">
+                    Configura manualmente abajo la <strong>API de Generación de Videos (Respaldo Manual)</strong>{' '}
+                    o repara el conector de Frameo IA para generar el video de tu secuencia.
+                  </p>
+                </div>
+              </div>
+              {onRetryWithManualVideoApi && providers?.video?.configured && (
+                <div className="flex justify-end">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      onClose();
+                      onRetryWithManualVideoApi();
+                    }}
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#E5A93C] hover:bg-[#EDA949] text-[#0B0B0E] text-xs font-semibold"
+                  >
+                    <Film className="w-3.5 h-3.5" />
+                    <span>Generar Video ahora con la API Manual configurada</span>
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Flexible Image, Video & Admin Frameo IA API Configurators */}
           <div className="space-y-4">
+            {isAdmin &&
+              renderProviderCard(
+                'frameo_video',
+                'Servicio de Video Frameo IA (Exclusivo Admin · Usado al producir)',
+                FRAMEO_VIDEO_PROVIDER_PRESETS,
+                frameoForm,
+                setFrameoForm
+              )}
+            {renderProviderCard(
+              'video',
+              isAdmin
+                ? 'API de Generación de Videos Manual / Respaldo (Clips y Tráiler 30s)'
+                : 'API de Generación de Videos (Clips y Tráiler 30s)',
+              VIDEO_PROVIDER_PRESETS,
+              videoForm,
+              setVideoForm
+            )}
             {renderProviderCard(
               'image',
               'API de Generación de Imágenes (Storyboard y Tráiler)',
               IMAGE_PROVIDER_PRESETS,
               imageForm,
               setImageForm
-            )}
-            {renderProviderCard(
-              'video',
-              'API de Generación de Videos (Clips y Tráiler 30s)',
-              VIDEO_PROVIDER_PRESETS,
-              videoForm,
-              setVideoForm
             )}
           </div>
 

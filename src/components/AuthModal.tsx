@@ -28,6 +28,12 @@ function mapFirebaseAuthError(err: unknown): string {
   if (raw.includes('auth/popup-closed-by-user')) {
     return 'Se cerró la ventana de acceso antes de completar la autenticación.';
   }
+  if (raw.includes('auth/account-exists-with-different-credential')) {
+    return 'Ese correo ya está registrado con otro método de acceso. Inicia sesión con Google o con tu contraseña original.';
+  }
+  if (raw.includes('auth/network-request-failed')) {
+    return 'Error de conexión con Firebase Auth. Verifica tu red e inténtalo nuevamente.';
+  }
   if (raw.includes('auth/too-many-requests')) {
     return 'Demasiados intentos recientes. Espera unos minutos e inténtalo de nuevo.';
   }
@@ -249,8 +255,8 @@ export function AuthModal({ open, onClose, onOpenAdminLab }: AuthModalProps) {
                     Para proteger tus proyectos en la base de datos, confirma el enlace enviado a{' '}
                     <span className="font-mono-tech text-[#18181B] dark:text-[#F2F0EB]">
                       {user.email}
-                    </span>
-                    .
+                    </span>{' '}
+                    (revisa Spam/Promociones) o accede al instante con Google.
                   </p>
                   <div className="flex flex-wrap gap-2">
                     <button
@@ -269,6 +275,14 @@ export function AuthModal({ open, onClose, onOpenAdminLab }: AuthModalProps) {
                       className="px-3 py-2 rounded-lg border border-[#DCD6CA] dark:border-white/12 text-xs font-medium text-[#27272A] dark:text-[#E6E2DA] hover:bg-black/5 dark:hover:bg-white/5"
                     >
                       Reenviar correo
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleGoogle}
+                      disabled={busy}
+                      className="px-3 py-2 rounded-lg border border-teal-600/35 dark:border-[#38B2AC]/40 bg-teal-50 hover:bg-teal-100 dark:bg-[#102625] dark:hover:bg-[#163433] text-xs font-semibold text-teal-800 dark:text-[#5EEAD4]"
+                    >
+                      Acceder con Google
                     </button>
                   </div>
                 </div>

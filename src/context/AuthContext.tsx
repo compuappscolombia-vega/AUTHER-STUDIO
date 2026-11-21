@@ -22,6 +22,7 @@ import { ensureUserProfileInFirestore } from '../services/firestoreSync';
 import type { UserRole } from '../types/studio';
 
 const LEGACY_ADMIN_SESSION_KEY = 'auteur_admin_session_v1';
+const ADMIN_GOOGLE_EMAIL = 'compuappscolombia@gmail.com';
 
 interface AdminSession {
   uid: string;
@@ -29,6 +30,11 @@ interface AdminSession {
   email: string;
   role: 'admin';
   emailVerified: true;
+}
+
+function isGoogleProviderUser(u: User | null | undefined): boolean {
+  if (!u) return false;
+  return Boolean(u.providerData?.some((p) => p?.providerId === 'google.com'));
 }
 
 interface AuthContextValue {
@@ -80,6 +86,34 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [, setAuthRevision] = useState(0);
   const [loading, setLoading] = useState(() => !detectLocalDevPreview());
 
+  async function elevateGoogleAdminSession(googleUser: User): Promise<boolean> {
+    const emailNorm = (googleUser.email || '').trim().toLowerCase();
+    if (emailNorm !== ADMIN_GOOGLE_EMAIL || !isGoogleProviderUser(googleUser)) {
+      return false;
+    }
+    try {
+      const idToken = await googleUser.getIdToken();
+      const res = await fetch('/api/admin/google-login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ idToken }),
+      });
+      if (!res.ok) {
+        return false;
+      }
+      const data = await res.json();
+      if (data.session && data.token) {
+        setAdminToken(String(data.token));
+        setAdminSession(data.session as AdminSession);
+        setLoading(false);
+        return true;
+      }
+    } catch (err) {
+      console.warn('No se pudo activar la sesión Administrador desde Google:', err);
+    }
+    return false;
+  }
+
   useEffect(() => {
     try {
       window.localStorage?.removeItem(LEGACY_ADMIN_SESSION_KEY);
@@ -96,7 +130,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const unsubscribe = onAuthStateChanged(auth, async (nextUser) => {
       setFirebaseUser(nextUser);
       setLoading(false);
-      if (nextUser && nextUser.emailVerified) {
+      if (!nextUser) return;
+
+      const isGoogle = isGoogleProviderUser(nextUser);
+      const isVerifiedOrGoogle = Boolean(nextUser.emailVerified || isGoogle);
+
+      if (isGoogle && (nextUser.email || '').trim().toLowerCase() === ADMIN_GOOGLE_EMAIL) {
+        await elevateGoogleAdminSession(nextUser);
+        return;
+      }
+
+      if (isVerifiedOrGoogle) {
         try {
           await ensureUserProfileInFirestore(nextUser);
         } catch (err) {
@@ -111,9 +155,24 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setAdminSession(null);
     setAdminToken(null);
     const provider = new GoogleAuthProvider();
+    provider.setCustomParameters({ prompt: 'select_account' });
     const cred = await signInWithPopup(auth, provider);
-    if (cred.user && cred.user.emailVerified) {
-      await ensureUserProfileInFirestore(cred.user);
+    if (cred.user) {
+      setFirebaseUser(cred.user);
+      setAuthRevision((r) => r + 1);
+      const isAdminGoogle =
+        isGoogleProviderUser(cred.user) &&
+        (cred.user.email || '').trim().toLowerCase() === ADMIN_GOOGLE_EMAIL;
+
+      if (isAdminGoogle) {
+        await elevateGoogleAdminSession(cred.user);
+      } else {
+        try {
+          await ensureUserProfileInFirestore(cred.user);
+        } catch (err) {
+          console.error('Error sincronizando perfil de Google en Firestore:', err);
+        }
+      }
     }
   }
 
@@ -121,8 +180,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setAdminSession(null);
     setAdminToken(null);
     const cred = await signInWithEmailAndPassword(auth, email.trim(), password);
-    if (cred.user && cred.user.emailVerified) {
-      await ensureUserProfileInFirestore(cred.user);
+    if (cred.user && (cred.user.emailVerified || isGoogleProviderUser(cred.user))) {
+      try {
+        await ensureUserProfileInFirestore(cred.user);
+      } catch (err) {
+        console.error('Error sincronizando perfil de correo:', err);
+      }
     }
   }
 
@@ -141,7 +204,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     await updateProfile(cred.user, {
       displayName: params.displayName.trim(),
     });
-    await sendEmailVerification(cred.user);
+    try {
+      await sendEmailVerification(cred.user);
+    } catch (err) {
+      console.warn('Aviso enviando verificación de correo:', err);
+    }
     setFirebaseUser(cred.user);
     setAuthRevision((r) => r + 1);
   }
@@ -182,8 +249,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const updated = auth.currentUser;
     setFirebaseUser(updated ?? null);
     setAuthRevision((r) => r + 1);
-    if (updated?.emailVerified) {
-      await ensureUserProfileInFirestore(updated);
+    if (updated && (updated.emailVerified || isGoogleProviderUser(updated))) {
+      try {
+        await ensureUserProfileInFirestore(updated);
+      } catch (err) {
+        console.error('Error sincronizando perfil tras verificación:', err);
+      }
       return true;
     }
     return false;
@@ -209,13 +280,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       : firebaseUser;
 
   const userRole: UserRole = isAdminSession ? 'admin' : 'director';
+  const isVerified = Boolean(
+    activeUser && (activeUser.emailVerified || isGoogleProviderUser(activeUser) || isAdminSession)
+  );
 
   return (
     <AuthContext.Provider
       value={{
         user: activeUser,
         loading,
-        isVerified: Boolean(activeUser && (activeUser.emailVerified || isAdminSession)),
+        isVerified,
         userRole,
         isAdminSession,
         adminToken,

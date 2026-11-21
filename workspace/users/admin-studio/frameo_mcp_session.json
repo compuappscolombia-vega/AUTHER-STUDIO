@@ -1,0 +1,13 @@
+{
+  "mcpUrl": "https://mcp.frameo.ai/mcp",
+  "tools": [],
+  "updatedAt": "2026-11-21T09:10:23.007Z",
+  "clientId": "f9fccee2-1e14-4fa7-826f-87d4fac8b719",
+  "clientIdByRedirect": {
+    "https://ais-dev-vwminwhus22o7nbq3o6ikw-466582694499.us-west2.run.app/api/admin/frameo-mcp/callback": "f9fccee2-1e14-4fa7-826f-87d4fac8b719"
+  },
+  "issuer": "https://mcp.frameo.ai",
+  "authorizationEndpoint": "https://mcp.frameo.ai/authorize",
+  "tokenEndpoint": "https://mcp.frameo.ai/token",
+  "registrationEndpoint": "https://mcp.frameo.ai/register"
+}

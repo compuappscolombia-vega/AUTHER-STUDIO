@@ -20,6 +20,13 @@ import {
   buildHyperRealisticResolutionSpec,
   getNanoImageSizeForResolution,
 } from './productionPipeline.ts';
+import {
+  DEFAULT_FRAMEO_MCP_URL,
+  discoverFrameoOAuthMetadata,
+  executeFrameoMcpVideo,
+  getValidFrameoMcpAccessToken,
+  listFrameoMcpTools,
+} from './frameoMcpClient.ts';
 
 export class ProviderConfigurationError extends Error {
   status: number;
@@ -257,8 +264,13 @@ function getEnvFallbackProvider(capability: ApiCapability): ResolvedProviderRunt
     };
   }
 
-  // Zero hardcoded predetermined Image/Video API: only active if user explicitly configures env vars.
-  const prefix = capability === 'image' ? 'IMAGE_API' : 'VIDEO_API';
+  // Zero hardcoded predetermined Image/Video/Frameo API: only active if explicitly configured in env vars.
+  const prefix =
+    capability === 'image'
+      ? 'IMAGE_API'
+      : capability === 'frameo_video'
+        ? 'FRAMEO_VIDEO'
+        : 'VIDEO_API';
   const endpointUrl = (process.env[`${prefix}_ENDPOINT`] || '').trim();
   const apiKey = (process.env[`${prefix}_KEY`] || '').trim();
   const providerHintRaw = (process.env[`${prefix}_PROVIDER`] || 'auto').trim() as
@@ -339,9 +351,11 @@ export function resolveProviderForCapability(
     label:
       capability === 'image'
         ? 'Sin API de Imágenes asignada'
-        : capability === 'video'
-          ? 'Sin API de Video asignada'
-          : 'Sin API Core configurada',
+        : capability === 'frameo_video'
+          ? 'Sin servicio de video Frameo IA configurado'
+          : capability === 'video'
+            ? 'Sin API de Video asignada'
+            : 'Sin API Core configurada',
     tier: 'unknown',
     endpointUrl: '',
     model: '',
@@ -354,9 +368,11 @@ export function resolveProviderForCapability(
     lastMessage:
       capability === 'image'
         ? 'Asigna cualquier API de Imágenes (free o de pago) en Configuración del Estudio.'
-        : capability === 'video'
-          ? 'Asigna cualquier API de Video (free o de pago) en Configuración del Estudio.'
-          : 'Configura GEMINI_API_KEY en Settings > Secrets o una API compatible.',
+        : capability === 'frameo_video'
+          ? 'El servicio de generación de video de Frameo IA no está configurado. Conéctalo en Laboratorio Admin / Configuración o configura una API manual.'
+          : capability === 'video'
+            ? 'Asigna cualquier API de Video (free o de pago) en Configuración del Estudio.'
+            : 'Configura GEMINI_API_KEY en Settings > Secrets o una API compatible.',
   };
 }
 
@@ -381,21 +397,46 @@ function toPublicSummary(runtime: ResolvedProviderRuntime): ApiProviderPublicSum
   };
 }
 
+function buildNeutralUnconfiguredFrameoSummary(): ApiProviderPublicSummary {
+  return {
+    capability: 'frameo_video',
+    configured: false,
+    source: 'none',
+    providerKind: null,
+    label: 'Servicio Frameo IA (Exclusivo Admin)',
+    tier: 'unknown',
+    model: '',
+    endpointUrl: '',
+    hasKey: false,
+    keyPreview: '',
+    authHeader: 'Authorization',
+    authPrefix: 'Bearer ',
+    supportsImageToVideo: false,
+    lastStatus: 'unconfigured',
+    lastMessage: 'Disponible exclusivamente en el perfil Administrador.',
+  };
+}
+
 export function listPublicProviders(
   userId: string,
-  workspaceDir?: string
+  workspaceDir?: string,
+  options?: { includeAdminFrameo?: boolean }
 ): Record<ApiCapability, ApiProviderPublicSummary> {
   return {
     image: toPublicSummary(resolveProviderForCapability(userId, 'image', workspaceDir)),
     video: toPublicSummary(resolveProviderForCapability(userId, 'video', workspaceDir)),
     core: toPublicSummary(resolveProviderForCapability(userId, 'core', workspaceDir)),
+    frameo_video: options?.includeAdminFrameo
+      ? toPublicSummary(resolveProviderForCapability(userId, 'frameo_video', workspaceDir))
+      : buildNeutralUnconfiguredFrameoSummary(),
   };
 }
 
 export function deleteUserProvider(
   userId: string,
   capability: ApiCapability,
-  workspaceDir?: string
+  workspaceDir?: string,
+  options?: { includeAdminFrameo?: boolean }
 ): Record<ApiCapability, ApiProviderPublicSummary> {
   const vault = readUserVault(userId, workspaceDir);
   if (vault.providers[capability]) {
@@ -403,7 +444,9 @@ export function deleteUserProvider(
     vault.updatedAt = new Date().toISOString();
     writeUserVault(userId, vault, workspaceDir);
   }
-  return listPublicProviders(userId, workspaceDir);
+  return listPublicProviders(userId, workspaceDir, {
+    includeAdminFrameo: options?.includeAdminFrameo ?? capability === 'frameo_video',
+  });
 }
 
 function buildAuthHeaders(
@@ -503,9 +546,11 @@ export async function detectTestAndSaveProvider(
         resolvedModel = 'gemini-3.1-flash-lite-image';
       }
       diagnostics = `Google Gemini Image verificado (modelo ${resolvedModel}). Ten en cuenta que la generación de imágenes en Gemini requiere facturación activa en GCP si es cuenta estándar.`;
-    } else if (capability === 'video') {
+    } else if (capability === 'video' || capability === 'frameo_video') {
       resolvedTier = input.tierHint === 'free' ? 'free' : 'paid';
-      diagnostics = `Google Gemini Video (${resolvedModel}) verificado. Interactions API requiere facturación activa en Google Cloud para renderizar MP4.`;
+      diagnostics = `${
+        capability === 'frameo_video' ? 'Frameo IA · ' : ''
+      }Google Gemini Video (${resolvedModel}) verificado. Interactions API requiere facturación activa en Google Cloud para renderizar MP4.`;
     } else {
       resolvedTier = input.tierHint === 'paid' ? 'paid' : 'free';
       diagnostics = 'Google Gemini Director verificado correctamente.';
@@ -581,6 +626,26 @@ export async function detectTestAndSaveProvider(
     }
     resolvedTier = input.tierHint === 'free' ? 'free' : 'paid';
     diagnostics = `Fal.ai configurado (${resolvedModel}). Listo para inferencia.`;
+  } else if (detected.providerKind === 'frameo_mcp') {
+    const metadata = await discoverFrameoOAuthMetadata(safeUrl);
+    const tokenCtx = await getValidFrameoMcpAccessToken(
+      userId,
+      workspaceDir,
+      effectiveKey || undefined
+    );
+    if (tokenCtx) {
+      const mcpResult = await listFrameoMcpTools(
+        userId,
+        workspaceDir,
+        effectiveKey || undefined
+      );
+      resolvedTier = input.tierHint === 'free' ? 'free' : 'paid';
+      diagnostics = `Frameo.AI MCP conectado (${mcpResult.serverName || 'MCP'}) · ${mcpResult.tools.length} herramienta(s) descubiertas.`;
+    } else {
+      resolvedTier = 'paid';
+      status = 'error';
+      diagnostics = `Endpoint MCP Frameo.AI verificado (${metadata.issuer}), pero falta iniciar sesión OAuth. Pulsa "Conectar con Frameo.AI (OAuth MCP)".`;
+    }
   } else {
     // custom_rest: Verify reachability & TLS cleanly via HEAD/OPTIONS without exposing SSRF
     resolvedTier =
@@ -641,9 +706,43 @@ export async function detectTestAndSaveProvider(
 
   return {
     summary,
-    providers: listPublicProviders(userId, workspaceDir),
+    providers: listPublicProviders(userId, workspaceDir, {
+      includeAdminFrameo: capability === 'frameo_video',
+    }),
     diagnostics,
   };
+}
+
+export function saveConnectedFrameoMcpProvider(
+  userId: string,
+  params: { mcpUrl?: string; model?: string; toolsCount?: number; serverName?: string },
+  workspaceDir?: string
+): Record<ApiCapability, ApiProviderPublicSummary> {
+  const vault = readUserVault(userId, workspaceDir);
+  const endpointUrl = params.mcpUrl || DEFAULT_FRAMEO_MCP_URL;
+  const model = params.model || 'Veo 3.1 Rápido';
+  const toolsMsg =
+    typeof params.toolsCount === 'number'
+      ? ` · ${params.toolsCount} herramientas MCP activas`
+      : '';
+  vault.providers.frameo_video = {
+    capability: 'frameo_video',
+    providerKind: 'frameo_mcp',
+    label: `Frameo.AI MCP (${params.serverName || 'OAuth Conectado'})`,
+    tier: 'paid',
+    endpointUrl,
+    model,
+    authHeader: 'Authorization',
+    authPrefix: 'Bearer ',
+    supportsImageToVideo: true,
+    keyPreview: 'OAuth 2.0 PKCE',
+    lastTestedAt: new Date().toISOString(),
+    lastStatus: 'ready',
+    lastMessage: `Conectado mediante OAuth MCP${toolsMsg}.`,
+  };
+  vault.updatedAt = new Date().toISOString();
+  writeUserVault(userId, vault, workspaceDir);
+  return listPublicProviders(userId, workspaceDir, { includeAdminFrameo: true });
 }
 
 function aspectRatioToDimensions(
@@ -1059,14 +1158,22 @@ export async function executeVideoGeneration(
     aspectRatio: string;
     duration: string;
     sourceImage?: { data: string; mimeType: string } | null;
+    capability?: 'video' | 'frameo_video';
+    model?: string;
+    vfxMode?: string;
+    renderQuality?: '480p_preview' | 'full_hd';
   },
   workspaceDir?: string
 ): Promise<VideoExecutionResult> {
-  const provider = resolveProviderForCapability(userId, 'video', workspaceDir);
+  const targetCapability: 'video' | 'frameo_video' =
+    params.capability === 'frameo_video' ? 'frameo_video' : 'video';
+  const provider = resolveProviderForCapability(userId, targetCapability, workspaceDir);
   if (!provider.configured || !provider.providerKind) {
     throw new ProviderConfigurationError(
-      'No hay ninguna API de Video asignada. Ve a Configuración del Estudio > Proveedores de API y suministra una API de video (free o de pago).',
-      { status: 428, capability: 'video', code: 'API_NOT_CONFIGURED' }
+      targetCapability === 'frameo_video'
+        ? 'El servicio de generación de video de Frameo IA no está configurado o no tiene credenciales activas. Configúralo vía OAuth MCP o asigna manualmente una API de generación.'
+        : 'No hay ninguna API de Video asignada. Ve a Configuración del Estudio > Proveedores de API y suministra una API de video (free o de pago).',
+      { status: 428, capability: targetCapability, code: 'API_NOT_CONFIGURED' }
     );
   }
 
@@ -1075,6 +1182,57 @@ export async function executeVideoGeneration(
     ? params.duration
     : '6s';
   const durationSeconds = parseInt(videoDuration, 10) || 6;
+
+  if (provider.providerKind === 'frameo_mcp') {
+    try {
+      const mcpResult = await executeFrameoMcpVideo({
+        userId,
+        prompt: params.prompt,
+        aspectRatio: omniRatio,
+        durationSeconds,
+        model: params.model || provider.model || 'Veo 3.1 Rápido',
+        vfxMode: params.vfxMode,
+        resolution: params.renderQuality === 'full_hd' ? '1080p' : '480p',
+        sourceImageDataUrl: params.sourceImage
+          ? `data:${params.sourceImage.mimeType};base64,${params.sourceImage.data}`
+          : undefined,
+        explicitBearerToken: provider.apiKey || undefined,
+        workspaceDir,
+      });
+
+      if (mcpResult.base64) {
+        return {
+          buffer: Buffer.from(mcpResult.base64, 'base64'),
+          mimeType: mcpResult.mimeType || 'video/mp4',
+          model: `${params.model || provider.model || 'Frameo MCP'} (${mcpResult.toolUsed})`,
+          providerLabel: provider.label,
+          tier: provider.tier,
+        };
+      }
+
+      if (mcpResult.videoUrl) {
+        const downloaded = await downloadExternalMediaSafely(
+          mcpResult.videoUrl,
+          targetCapability
+        );
+        return {
+          ...downloaded,
+          model: `${params.model || provider.model || 'Frameo MCP'} (${mcpResult.toolUsed})`,
+          providerLabel: provider.label,
+          tier: provider.tier,
+        };
+      }
+    } catch (mcpErr) {
+      if (mcpErr instanceof ProviderConfigurationError) throw mcpErr;
+      const msg = mcpErr instanceof Error ? mcpErr.message : 'Error ejecutando Frameo.AI MCP.';
+      const isAuth = /autenticado|expirada|autorizada|401|403/i.test(msg);
+      throw new ProviderConfigurationError(msg, {
+        status: isAuth ? 401 : 502,
+        capability: targetCapability,
+        code: isAuth ? 'PROVIDER_AUTH_ERROR' : 'PROVIDER_UPSTREAM_ERROR',
+      });
+    }
+  }
 
   if (provider.providerKind === 'gemini') {
     const ai = new GoogleGenAI({
@@ -1119,7 +1277,7 @@ export async function executeVideoGeneration(
           `La API de video finalizó con estado ${interaction.status}.`;
         throw new ProviderConfigurationError(msg, {
           status: 502,
-          capability: 'video',
+          capability: targetCapability,
           code: 'PROVIDER_UPSTREAM_ERROR',
         });
       }
@@ -1150,7 +1308,7 @@ export async function executeVideoGeneration(
     if (!part) {
       throw new ProviderConfigurationError(
         `${provider.label} no devolvió un archivo de video válido.`,
-        { status: 502, capability: 'video', code: 'PROVIDER_UPSTREAM_ERROR' }
+        { status: 502, capability: targetCapability, code: 'PROVIDER_UPSTREAM_ERROR' }
       );
     }
 
@@ -1165,7 +1323,7 @@ export async function executeVideoGeneration(
     }
 
     if (part.uri) {
-      const downloaded = await downloadExternalMediaSafely(part.uri, 'video', {
+      const downloaded = await downloadExternalMediaSafely(part.uri, targetCapability, {
         'x-goog-api-key': provider.apiKey,
       });
       return {
@@ -1177,7 +1335,7 @@ export async function executeVideoGeneration(
     }
   }
 
-  const safeEndpoint = await assertSafePublicHttpsUrl(provider.endpointUrl, 'video');
+  const safeEndpoint = await assertSafePublicHttpsUrl(provider.endpointUrl, targetCapability);
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
     ...buildAuthHeaders(provider.authHeader, provider.authPrefix, provider.apiKey),
@@ -1230,7 +1388,7 @@ export async function executeVideoGeneration(
 
   if (!res.ok) {
     const errText = await res.text().catch(() => '');
-    throw classifyProviderHttpError(res.status, errText, provider.label, 'video');
+    throw classifyProviderHttpError(res.status, errText, provider.label, targetCapability);
   }
 
   const contentType = res.headers.get('content-type') || '';
@@ -1256,7 +1414,7 @@ export async function executeVideoGeneration(
   if (pollUrl && !extracted?.url && !extracted?.b64) {
     for (let i = 0; i < 90; i++) {
       await new Promise((r) => setTimeout(r, 3000));
-      const safePoll = await assertSafePublicHttpsUrl(pollUrl, 'video');
+      const safePoll = await assertSafePublicHttpsUrl(pollUrl, targetCapability);
       const pollRes = await fetch(safePoll, { headers });
       if (!pollRes.ok) continue;
       const pollType = pollRes.headers.get('content-type') || '';
@@ -1274,7 +1432,7 @@ export async function executeVideoGeneration(
       if (statusStr === 'FAILED' || statusStr === 'CANCELED' || statusStr === 'ERROR') {
         throw new ProviderConfigurationError(
           `${provider.label} devolvió estado ${statusStr}: ${String(jsonPayload.error || '')}`,
-          { status: 502, capability: 'video', code: 'PROVIDER_UPSTREAM_ERROR' }
+          { status: 502, capability: targetCapability, code: 'PROVIDER_UPSTREAM_ERROR' }
         );
       }
       extracted = extractVideoUrlOrBase64FromJson(jsonPayload);
@@ -1285,7 +1443,7 @@ export async function executeVideoGeneration(
       ) {
         const safeResultUrl = await assertSafePublicHttpsUrl(
           String(jsonPayload.response_url),
-          'video'
+          targetCapability
         );
         const finalRes = await fetch(safeResultUrl, { headers });
         if (finalRes.ok) {
@@ -1307,7 +1465,7 @@ export async function executeVideoGeneration(
     };
   }
   if (extracted?.url) {
-    const downloaded = await downloadExternalMediaSafely(extracted.url, 'video');
+    const downloaded = await downloadExternalMediaSafely(extracted.url, targetCapability);
     return {
       ...downloaded,
       model: provider.model || provider.label,
@@ -1318,6 +1476,6 @@ export async function executeVideoGeneration(
 
   throw new ProviderConfigurationError(
     `${provider.label} no devolvió un archivo o URL de video reconocible.`,
-    { status: 502, capability: 'video', code: 'PROVIDER_UPSTREAM_ERROR' }
+    { status: 502, capability: targetCapability, code: 'PROVIDER_UPSTREAM_ERROR' }
   );
 }

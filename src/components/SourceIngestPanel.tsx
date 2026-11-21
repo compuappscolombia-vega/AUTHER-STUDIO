@@ -39,6 +39,7 @@ interface SourceIngestPanelProps {
   userId: string;
   project: ProductionProject;
   studioSettings: StudioSettings;
+  isAdmin?: boolean;
   isProducing: boolean;
   errorMessage: string | null;
   onDismissError: () => void;
@@ -83,6 +84,7 @@ export function SourceIngestPanel({
   userId,
   project,
   studioSettings,
+  isAdmin = false,
   isProducing,
   errorMessage,
   onDismissError,
@@ -462,6 +464,12 @@ export function SourceIngestPanel({
           </span>
         )}
       </div>
+
+      {isAdmin && (
+        <div className="mb-3 px-3 py-2 rounded-lg border border-amber-500/40 dark:border-[#E5A93C]/35 bg-amber-50/80 dark:bg-[#19150E] text-[11px] font-mono-tech text-amber-800 dark:text-[#E5A93C] flex items-center justify-between gap-2">
+          <span>Motor Admin Activo: ArthurAgent · Frameo IA</span>
+        </div>
+      )}
 
       <form onSubmit={handleSubmit} className="space-y-3">
         {/* Source Type Segmented Control */}

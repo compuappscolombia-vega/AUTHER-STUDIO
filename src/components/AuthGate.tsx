@@ -38,6 +38,12 @@ function mapFirebaseAuthError(err: unknown): string {
   if (raw.includes('auth/popup-blocked')) {
     return 'El navegador bloqueó la ventana emergente de Google. Permite ventanas emergentes e inténtalo de nuevo.';
   }
+  if (raw.includes('auth/account-exists-with-different-credential')) {
+    return 'Ese correo ya está registrado con otro método de acceso. Inicia sesión con Google o con tu contraseña original.';
+  }
+  if (raw.includes('auth/network-request-failed')) {
+    return 'Error de conexión con Firebase Auth. Verifica tu red e inténtalo nuevamente.';
+  }
   if (raw.includes('auth/too-many-requests')) {
     return 'Demasiados intentos recientes. Espera unos minutos e inténtalo de nuevo.';
   }
@@ -250,7 +256,8 @@ export function AuthGate({ theme, onToggleTheme }: AuthGateProps) {
                   <span className="font-mono-tech text-[#18181B] dark:text-[#F2F0EB]">
                     {user.email}
                   </span>{' '}
-                  y luego pulsa &ldquo;Ya verifiqué mi correo&rdquo;.
+                  (revisa también Spam o Promociones) y luego pulsa &ldquo;Ya verifiqué mi correo&rdquo;.
+                  Si no recibes el correo, puedes acceder al instante vinculando tu cuenta con Google.
                 </p>
 
                 <div className="flex flex-wrap gap-2">
@@ -270,6 +277,14 @@ export function AuthGate({ theme, onToggleTheme }: AuthGateProps) {
                     className="px-4 py-2 rounded-lg border border-[#DCD6CA] dark:border-white/12 text-xs font-medium text-[#27272A] dark:text-[#E6E2DA] hover:bg-black/5 dark:hover:bg-white/5 disabled:opacity-60"
                   >
                     Reenviar correo
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleGoogle}
+                    disabled={busy}
+                    className="px-4 py-2 rounded-lg border border-teal-600/35 dark:border-[#38B2AC]/40 bg-teal-50 hover:bg-teal-100 dark:bg-[#102625] dark:hover:bg-[#163433] text-xs font-semibold text-teal-800 dark:text-[#5EEAD4] disabled:opacity-60"
+                  >
+                    Acceder al instante con Google
                   </button>
                 </div>
 

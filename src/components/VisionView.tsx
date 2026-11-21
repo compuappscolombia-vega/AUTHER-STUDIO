@@ -44,6 +44,7 @@ export function VisionView({
 }: VisionViewProps) {
   const [copiedHex, setCopiedHex] = useState<string | null>(null);
   const [copiedMaster, setCopiedMaster] = useState(false);
+  const [copiedFrameoKey, setCopiedFrameoKey] = useState<string | null>(null);
   const [selectedRating, setSelectedRating] = useState<number>(
     sequence.sequenceRating || 5
   );
@@ -84,6 +85,16 @@ export function VisionView({
       await navigator.clipboard.writeText(sequence.hyperRealisticPrompt);
       setCopiedMaster(true);
       setTimeout(() => setCopiedMaster(false), 1500);
+    } catch {
+      // Clipboard blocked; ignore silently
+    }
+  }
+
+  async function handleCopyFrameoText(key: string, text: string) {
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopiedFrameoKey(key);
+      setTimeout(() => setCopiedFrameoKey(null), 1500);
     } catch {
       // Clipboard blocked; ignore silently
     }
@@ -216,6 +227,89 @@ export function VisionView({
               <Bot className="w-3.5 h-3.5" />
               <span>Abrir Guía Paso a Paso</span>
             </button>
+          </div>
+        )}
+
+        {sequence.productionEngine === 'frameo_ia' && sequence.frameoProductionSpec && (
+          <div className="p-4 rounded-xl border border-amber-500/45 dark:border-[#E5A93C]/40 bg-amber-50/70 dark:bg-[#17130C] space-y-3">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div className="space-y-0.5">
+                <div className="flex items-center gap-2 text-xs font-semibold text-amber-800 dark:text-[#E5A93C]">
+                  <Sparkles className="w-4 h-4 shrink-0" />
+                  <span>Paquete de Producción Frameo IA · ArthurAgent Admin</span>
+                </div>
+                <p className="text-[11px] font-mono-tech text-[#57534E] dark:text-[#9A968E]">
+                  {sequence.frameoProductionSpec.stylePreset} · {sequence.frameoProductionSpec.aspectRatio} ·{' '}
+                  {sequence.frameoProductionSpec.clipDurationSec}s por clip ·{' '}
+                  {sequence.frameoProductionSpec.scenes.length} escenas listas
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() =>
+                  void handleCopyFrameoText(
+                    'frameo-all',
+                    JSON.stringify(sequence.frameoProductionSpec, null, 2)
+                  )
+                }
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-amber-500/45 dark:border-[#E5A93C]/40 bg-[#FFFFFF] dark:bg-[#111116] text-[11px] font-semibold text-amber-800 dark:text-[#E5A93C]"
+              >
+                {copiedFrameoKey === 'frameo-all' ? (
+                  <>
+                    <Check className="w-3.5 h-3.5" />
+                    <span>JSON Frameo copiado</span>
+                  </>
+                ) : (
+                  <>
+                    <Copy className="w-3.5 h-3.5" />
+                    <span>Copiar JSON Frameo IA</span>
+                  </>
+                )}
+              </button>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              {sequence.frameoProductionSpec.scenes.map((sc) => (
+                <div
+                  key={sc.sceneNumber}
+                  className="p-3 rounded-lg border border-[#DCD6CA] dark:border-white/10 bg-[#FFFFFF] dark:bg-[#0E0E13] space-y-2 text-xs"
+                >
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="font-semibold text-[#18181B] dark:text-[#F2F0EB]">
+                      Escena {sc.sceneNumber} · {sc.sceneLabel}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        void handleCopyFrameoText(
+                          `sc-${sc.sceneNumber}`,
+                          `[VISUAL]: ${sc.frameoVisualPrompt}\n[MOTION]: ${sc.frameoMotionPrompt}\n[AUDIO]: ${sc.narrationOrDialogue}`
+                        )
+                      }
+                      className="inline-flex items-center gap-1 text-[11px] font-medium text-amber-700 dark:text-[#E5A93C]"
+                    >
+                      {copiedFrameoKey === `sc-${sc.sceneNumber}` ? (
+                        <>
+                          <Check className="w-3 h-3" />
+                          <span>Copiada</span>
+                        </>
+                      ) : (
+                        <>
+                          <Copy className="w-3 h-3" />
+                          <span>Copiar escena</span>
+                        </>
+                      )}
+                    </button>
+                  </div>
+                  <p className="text-[11px] font-mono-tech text-[#57534E] dark:text-[#8D8981]">
+                    {sc.shotRef} · {sc.durationSec}s · {sc.characterAnchor}
+                  </p>
+                  <p className="text-[11px] text-[#27272A] dark:text-[#D4CFC7] line-clamp-2">
+                    {sc.frameoVisualPrompt}
+                  </p>
+                </div>
+              ))}
+            </div>
           </div>
         )}
       </section>

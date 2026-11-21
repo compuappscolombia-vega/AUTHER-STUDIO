@@ -173,6 +173,31 @@ export const VIDEO_PROVIDER_PRESETS: ProviderPresetOption[] = [
   },
 ];
 
+export const FRAMEO_VIDEO_PROVIDER_PRESETS: ProviderPresetOption[] = [
+  {
+    id: 'frameo_mcp',
+    label: 'Frameo.AI MCP Oficial (https://mcp.frameo.ai/mcp · OAuth)',
+    tierLabel: 'Free / Pago',
+    requiresKey: false,
+    defaultEndpointUrl: 'https://mcp.frameo.ai/mcp',
+    defaultModel: 'Veo 3.1 Rápido',
+    placeholderUrl: 'https://mcp.frameo.ai/mcp',
+    description:
+      'Conector oficial MCP Streamable HTTP de Frameo.AI con autenticación OAuth y acceso a Veo 3.1, Kling O3/3.0, Semilla 2,5, MiniMax H3 y VFX Studio (Manto).',
+  },
+  {
+    id: 'custom_rest',
+    label: 'Frameo IA · Endpoint REST Dedicado',
+    tierLabel: 'Free / Pago',
+    requiresKey: false,
+    defaultEndpointUrl: '',
+    defaultModel: 'frameo-cinema-v1',
+    placeholderUrl: 'https://api.tu-servicio-frameo.com/v1/generate',
+    description: 'Conecta un endpoint REST privado compatible con Frameo IA.',
+  },
+  ...VIDEO_PROVIDER_PRESETS.filter((p) => p.id !== 'custom_rest'),
+];
+
 export function isPrivateOrReservedIp(ipOrHost: string): boolean {
   const host = ipOrHost.trim().toLowerCase().replace(/^\[|\]$/g, '');
   if (!host) return true;
@@ -296,6 +321,8 @@ export function detectApiProviderSpec(input: ApiProviderInput): DetectedProvider
 
   if (explicitHint) {
     providerKind = explicitHint;
+  } else if (lowerUrl.includes('mcp.frameo.ai') || lowerUrl.endsWith('/mcp')) {
+    providerKind = 'frameo_mcp';
   } else if (lowerUrl.includes('pollinations.ai')) {
     providerKind = 'pollinations';
   } else if (lowerUrl.includes('generativelanguage.googleapis.com') || /^AIza[0-9A-Za-z_-]{10,}/.test(rawKey)) {
@@ -310,6 +337,8 @@ export function detectApiProviderSpec(input: ApiProviderInput): DetectedProvider
     providerKind = 'openai';
   } else if (!rawUrl && !rawKey && capability === 'image') {
     providerKind = 'pollinations';
+  } else if (!rawUrl && capability === 'frameo_video') {
+    providerKind = 'frameo_mcp';
   } else {
     providerKind = 'custom_rest';
   }
@@ -331,42 +360,59 @@ export function detectApiProviderSpec(input: ApiProviderInput): DetectedProvider
     };
   }
 
+  if (providerKind === 'frameo_mcp') {
+    return {
+      capability,
+      providerKind: 'frameo_mcp',
+      label: input.label?.trim() || 'Frameo.AI MCP (OAuth)',
+      tier: tierFromHint || 'paid',
+      endpointUrl: rawUrl || 'https://mcp.frameo.ai/mcp',
+      model: (input.model || '').trim() || 'Veo 3.1 Rápido',
+      authHeader: 'Authorization',
+      authPrefix: 'Bearer ',
+      supportsImageToVideo: true,
+    };
+  }
+
+  const isVideoCap = capability === 'video' || capability === 'frameo_video';
+  const frameoPrefix = capability === 'frameo_video' ? 'Frameo IA · ' : '';
+
   if (providerKind === 'gemini') {
-    const defaultModel =
-      capability === 'video'
-        ? 'gemini-omni-1.2-flash'
-        : capability === 'image'
-          ? tierFromHint === 'paid'
-            ? 'gemini-nano-banana-2.1'
-            : 'gemini-3.1-flash-lite-image'
-          : 'gemini-4-hydrogen';
+    const defaultModel = isVideoCap
+      ? 'gemini-omni-1.2-flash'
+      : capability === 'image'
+        ? tierFromHint === 'paid'
+          ? 'gemini-nano-banana-2.1'
+          : 'gemini-3.1-flash-lite-image'
+        : 'gemini-4-hydrogen';
     return {
       capability,
       providerKind: 'gemini',
       label:
         input.label?.trim() ||
-        (capability === 'video'
-          ? 'Google Gemini Video (Omni Flash)'
-          : capability === 'image'
-            ? 'Google Gemini Image'
-            : 'Google Gemini Director'),
-      tier: tierFromHint || (capability === 'video' ? 'paid' : 'unknown'),
+        (capability === 'frameo_video'
+          ? 'Frameo IA · Google Gemini Video'
+          : capability === 'video'
+            ? 'Google Gemini Video (Omni Flash)'
+            : capability === 'image'
+              ? 'Google Gemini Image'
+              : 'Google Gemini Director'),
+      tier: tierFromHint || (isVideoCap ? 'paid' : 'unknown'),
       endpointUrl: rawUrl || 'https://generativelanguage.googleapis.com',
       model: (input.model || '').trim() || defaultModel,
       authHeader: 'x-goog-api-key',
       authPrefix: '',
-      supportsImageToVideo: capability === 'video',
+      supportsImageToVideo: isVideoCap,
     };
   }
 
   if (providerKind === 'huggingface') {
-    const defaultModel =
-      capability === 'video' ? 'Wan-AI/Wan2.1-T2V-14B' : 'black-forest-labs/FLUX.1-schnell';
+    const defaultModel = isVideoCap ? 'Wan-AI/Wan2.1-T2V-14B' : 'black-forest-labs/FLUX.1-schnell';
     const chosenModel = (input.model || '').trim() || defaultModel;
     return {
       capability,
       providerKind: 'huggingface',
-      label: input.label?.trim() || 'Hugging Face Inference',
+      label: input.label?.trim() || `${frameoPrefix}Hugging Face Inference`,
       tier: tierFromHint || 'free',
       endpointUrl:
         rawUrl || `https://router.huggingface.co/hf-inference/models/${chosenModel}`,
@@ -378,64 +424,65 @@ export function detectApiProviderSpec(input: ApiProviderInput): DetectedProvider
   }
 
   if (providerKind === 'replicate') {
-    const defaultModel =
-      capability === 'video'
-        ? 'wavespeedai/wan-2.1-t2v-480p'
-        : 'black-forest-labs/flux-schnell';
+    const defaultModel = isVideoCap
+      ? 'wavespeedai/wan-2.1-t2v-480p'
+      : 'black-forest-labs/flux-schnell';
     const chosenModel = (input.model || '').trim() || defaultModel;
     return {
       capability,
       providerKind: 'replicate',
-      label: input.label?.trim() || 'Replicate API',
+      label: input.label?.trim() || `${frameoPrefix}Replicate API`,
       tier: tierFromHint || 'paid',
       endpointUrl:
         rawUrl || `https://api.replicate.com/v1/models/${chosenModel}/predictions`,
       model: chosenModel,
       authHeader: input.authHeader?.trim() || 'Authorization',
       authPrefix: input.authPrefix ?? 'Bearer ',
-      supportsImageToVideo: capability === 'video',
+      supportsImageToVideo: isVideoCap,
     };
   }
 
   if (providerKind === 'fal') {
-    const defaultModel = capability === 'video' ? 'fal-ai/wan-t2v' : 'fal-ai/flux/schnell';
+    const defaultModel = isVideoCap ? 'fal-ai/wan-t2v' : 'fal-ai/flux/schnell';
     const chosenModel = (input.model || '').trim() || defaultModel;
     return {
       capability,
       providerKind: 'fal',
-      label: input.label?.trim() || 'Fal.ai API',
+      label: input.label?.trim() || `${frameoPrefix}Fal.ai API`,
       tier: tierFromHint || 'paid',
       endpointUrl:
         rawUrl ||
-        (capability === 'video'
+        (isVideoCap
           ? `https://queue.fal.run/${chosenModel}`
           : `https://fal.run/${chosenModel}`),
       model: chosenModel,
       authHeader: input.authHeader?.trim() || 'Authorization',
       authPrefix: input.authPrefix ?? 'Key ',
-      supportsImageToVideo: capability === 'video',
+      supportsImageToVideo: isVideoCap,
     };
   }
 
   if (providerKind === 'openai') {
-    const defaultModel =
-      capability === 'video' ? 'sora-2' : capability === 'image' ? 'gpt-image-1' : 'gpt-4.1';
-    const defaultUrl =
-      capability === 'video'
-        ? 'https://api.openai.com/v1/videos'
-        : capability === 'image'
-          ? 'https://api.openai.com/v1/images/generations'
-          : 'https://api.openai.com/v1/chat/completions';
+    const defaultModel = isVideoCap
+      ? 'sora-2'
+      : capability === 'image'
+        ? 'gpt-image-1'
+        : 'gpt-4.1';
+    const defaultUrl = isVideoCap
+      ? 'https://api.openai.com/v1/videos'
+      : capability === 'image'
+        ? 'https://api.openai.com/v1/images/generations'
+        : 'https://api.openai.com/v1/chat/completions';
     return {
       capability,
       providerKind: 'openai',
-      label: input.label?.trim() || 'OpenAI / Compatible API',
+      label: input.label?.trim() || `${frameoPrefix}OpenAI / Compatible API`,
       tier: tierFromHint || 'paid',
       endpointUrl: rawUrl || defaultUrl,
       model: (input.model || '').trim() || defaultModel,
       authHeader: input.authHeader?.trim() || 'Authorization',
       authPrefix: input.authPrefix ?? 'Bearer ',
-      supportsImageToVideo: capability === 'video',
+      supportsImageToVideo: isVideoCap,
     };
   }
 
@@ -445,12 +492,18 @@ export function detectApiProviderSpec(input: ApiProviderInput): DetectedProvider
   return {
     capability,
     providerKind: 'custom_rest',
-    label: input.label?.trim() || 'API REST Personalizada',
+    label:
+      input.label?.trim() ||
+      (capability === 'frameo_video'
+        ? 'Frameo IA · Servicio de Video'
+        : 'API REST Personalizada'),
     tier: inferredTier,
     endpointUrl: rawUrl,
-    model: (input.model || '').trim() || 'default',
+    model:
+      (input.model || '').trim() ||
+      (capability === 'frameo_video' ? 'frameo-cinema-v1' : 'default'),
     authHeader: input.authHeader?.trim() || 'Authorization',
     authPrefix: input.authPrefix ?? 'Bearer ',
-    supportsImageToVideo: capability === 'video',
+    supportsImageToVideo: isVideoCap,
   };
 }

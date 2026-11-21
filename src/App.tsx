@@ -1,18 +1,24 @@
 import { useEffect, useState } from 'react';
 import {
+  AlertTriangle,
   Bot,
   CheckCircle2,
   Clapperboard,
   FileDown,
+  Film,
   FolderPlus,
   Library,
   Lock,
   PanelLeftClose,
   PanelLeftOpen,
+  PlugZap,
   UserCog,
+  X,
 } from 'lucide-react';
 import type {
+  ApiBillingTier,
   ApiCapability,
+  ApiProviderKind,
   ApiProviderPublicSummary,
   AudioAnalysisReport,
   LearningCategory,
@@ -65,6 +71,7 @@ import {
 } from './utils/productionPipeline';
 import { buildLocalPreviewFixture } from './utils/devPreviewFixture';
 import { parseApiResponse } from './utils/apiClient';
+import { VIDEO_PROVIDER_PRESETS } from './utils/apiProviders';
 import {
   getNextStudioTab,
   isEditableEventTarget,
@@ -145,6 +152,36 @@ export default function App() {
   const [finalizingSeq, setFinalizingSeq] = useState(false);
   const [exportingPdf, setExportingPdf] = useState(false);
   const [produceError, setProduceError] = useState<string | null>(null);
+  const [adminVideoStatusNotice, setAdminVideoStatusNotice] = useState<string | null>(null);
+  const [frameoFallbackFailure, setFrameoFallbackFailure] = useState<{
+    message: string;
+    projectId: string;
+    sequenceId: string;
+    frameId?: string;
+    prompt: string;
+    aspectRatio: string;
+    duration: string;
+  } | null>(null);
+  const [showInlineManualApiForm, setShowInlineManualApiForm] = useState(false);
+  const [manualVideoForm, setManualVideoForm] = useState<{
+    providerHint: ApiProviderKind | 'auto';
+    tierHint: ApiBillingTier;
+    endpointUrl: string;
+    apiKey: string;
+    model: string;
+  }>({
+    providerHint: 'auto',
+    tierHint: 'auto',
+    endpointUrl: '',
+    apiKey: '',
+    model: '',
+  });
+  const [savingManualVideoApi, setSavingManualVideoApi] = useState(false);
+  const [manualVideoFeedback, setManualVideoFeedback] = useState<{
+    ok: boolean;
+    text: string;
+  } | null>(null);
+  const [retryingManualVideo, setRetryingManualVideo] = useState(false);
 
   useEffect(() => {
     applyStudioTheme(theme);
@@ -245,6 +282,9 @@ export default function App() {
       setActiveProjectId('');
       setActiveSequenceId('');
       setProduceError(null);
+      setFrameoFallbackFailure(null);
+      setAdminVideoStatusNotice(null);
+      setProvidersStatus(null);
       return;
     }
 
@@ -347,6 +387,28 @@ export default function App() {
       unsubLessons();
     };
   }, [user, isVerified, skipCloudSync, isLocalDevPreview]);
+
+  // Load configured provider summaries (including private Frameo IA service for Admin)
+  useEffect(() => {
+    if (!user || !isVerified) return;
+    let cancelled = false;
+    fetch('/api/providers', {
+      headers: {
+        'x-user-id': user.uid,
+        ...(isAdminSession && adminToken ? { Authorization: `Bearer ${adminToken}` } : {}),
+      },
+    })
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data: { providers?: Record<ApiCapability, ApiProviderPublicSummary> } | null) => {
+        if (!cancelled && data?.providers) {
+          setProvidersStatus(data.providers);
+        }
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [user, isVerified, isAdminSession, adminToken]);
 
   if (authLoading) {
     return (
@@ -559,21 +621,273 @@ export default function App() {
     return updatedProj;
   }
 
+  async function pollVideoJobForApp(jobId: string): Promise<ProductionProject | null> {
+    for (let attempt = 0; attempt < 95; attempt++) {
+      await new Promise((resolve) => setTimeout(resolve, 2500));
+      const res = await fetch(`/api/video-jobs/${encodeURIComponent(jobId)}`, {
+        headers: {
+          'x-user-id': currentUid,
+          ...(isAdminSession && adminToken ? { Authorization: `Bearer ${adminToken}` } : {}),
+        },
+      });
+      const data = await parseApiResponse<{
+        status: 'pending' | 'completed' | 'failed';
+        project?: ProductionProject;
+        error?: string;
+      }>(res, 'Error consultando el estado de generación de video.');
+
+      if (data.status === 'completed') {
+        return data.project || null;
+      }
+      if (data.status === 'failed') {
+        throw new Error(data.error || 'El servicio de generación de video no pudo completar el clip.');
+      }
+    }
+    throw new Error('Tiempo de espera agotado esperando la generación del video.');
+  }
+
+  async function runFrameoVideoForSequence(
+    proj: ProductionProject,
+    seq: ProductionSequence
+  ): Promise<{ ok: boolean; project?: ProductionProject }> {
+    const firstScene = seq.frameoProductionSpec?.scenes?.[0];
+    const firstFrame = seq.storyboardFrames?.[0];
+    const prompt = firstScene
+      ? `${firstScene.frameoMotionPrompt} (${firstScene.frameoVisualPrompt})`
+      : firstFrame
+        ? `${firstFrame.veoMotionPrompt} (${firstFrame.visualPrompt})`
+        : seq.hyperRealisticPrompt || seq.directorVision || seq.logline;
+
+    const rawRatio = (seq.aspectRatio || '16:9').trim();
+    const aspectRatio = rawRatio === '9:16' || rawRatio === '3:4' ? '9:16' : '16:9';
+    const clipSec = Math.min(
+      10,
+      Math.max(3, Math.round(seq.frameoProductionSpec?.clipDurationSec || 5))
+    );
+    const duration = `${clipSec}s`;
+
+    try {
+      setAdminVideoStatusNotice(
+        'Generando video de la secuencia con el servicio Frameo IA del Administrador...'
+      );
+      const res = await fetch('/api/admin/generate-frameo-video', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-user-id': currentUid,
+          ...(adminToken ? { Authorization: `Bearer ${adminToken}` } : {}),
+        },
+        body: JSON.stringify({
+          projectId: proj.id,
+          sequenceId: seq.id,
+          frameId: firstFrame?.id,
+          prompt,
+          aspectRatio,
+          duration,
+          imageUrl: firstFrame?.imageUrl,
+          asyncJob: true,
+        }),
+      });
+
+      const data = await parseApiResponse<{
+        status?: string;
+        jobId?: string;
+        project?: ProductionProject;
+        provider?: string;
+      }>(res, 'El servicio de generación de video de Frameo IA falló.');
+
+      let finalProj: ProductionProject | null = data.project || null;
+      if (data.status === 'pending' && data.jobId) {
+        finalProj = await pollVideoJobForApp(data.jobId);
+      }
+
+      if (finalProj) {
+        setProjects((prev) => {
+          const next = prev.map((p) => (p.id === finalProj!.id ? finalProj! : p));
+          persistProjectsCache(userCacheKey, next);
+          return next;
+        });
+      }
+
+      setFrameoFallbackFailure(null);
+      setShowInlineManualApiForm(false);
+      setAdminVideoStatusNotice(
+        `Video generado correctamente con Frameo IA (${data.provider || 'Servicio Admin'}).`
+      );
+      return { ok: true, project: finalProj || proj };
+    } catch (err) {
+      const reason =
+        err instanceof Error
+          ? err.message
+          : 'El servicio de generación de video de Frameo IA no respondió.';
+      setAdminVideoStatusNotice(null);
+      setFrameoFallbackFailure({
+        message: reason,
+        projectId: proj.id,
+        sequenceId: seq.id,
+        frameId: firstFrame?.id,
+        prompt,
+        aspectRatio,
+        duration,
+      });
+      setShowInlineManualApiForm(true);
+      setManualVideoFeedback(null);
+      return { ok: false };
+    }
+  }
+
+  async function handleSaveManualVideoApi(andRetry: boolean) {
+    setSavingManualVideoApi(true);
+    setManualVideoFeedback(null);
+    try {
+      const res = await fetch('/api/providers/detect', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-user-id': currentUid,
+          ...(isAdminSession && adminToken ? { Authorization: `Bearer ${adminToken}` } : {}),
+        },
+        body: JSON.stringify({
+          capability: 'video',
+          providerHint: manualVideoForm.providerHint,
+          tierHint: manualVideoForm.tierHint,
+          endpointUrl: manualVideoForm.endpointUrl,
+          apiKey: manualVideoForm.apiKey,
+          model: manualVideoForm.model,
+          save: true,
+        }),
+      });
+      const data = await parseApiResponse<{
+        providers: Record<ApiCapability, ApiProviderPublicSummary>;
+        diagnostics: string;
+      }>(res, 'No se pudo validar ni guardar la API de generación manual.');
+
+      setProvidersStatus(data.providers);
+      setManualVideoForm((prev) => ({
+        ...prev,
+        providerHint: data.providers.video?.providerKind || prev.providerHint,
+        endpointUrl: data.providers.video?.endpointUrl || prev.endpointUrl,
+        model: data.providers.video?.model || prev.model,
+        apiKey: '',
+      }));
+      setManualVideoFeedback({
+        ok: true,
+        text: data.diagnostics || 'API de video manual guardada correctamente.',
+      });
+
+      if (andRetry) {
+        await handleRetryWithManualVideoApi();
+      }
+    } catch (err) {
+      setManualVideoFeedback({
+        ok: false,
+        text: err instanceof Error ? err.message : 'No se pudo configurar la API manual.',
+      });
+    } finally {
+      setSavingManualVideoApi(false);
+    }
+  }
+
+  async function handleRetryWithManualVideoApi() {
+    const failureCtx = frameoFallbackFailure;
+    const targetProject =
+      (failureCtx ? projects.find((p) => p.id === failureCtx.projectId) : null) || activeProject;
+    const targetSeq =
+      (failureCtx && targetProject
+        ? targetProject.sequences.find((s) => s.id === failureCtx.sequenceId)
+        : null) || activeSequence;
+
+    if (!targetProject || !targetSeq) return;
+
+    setRetryingManualVideo(true);
+    setManualVideoFeedback(null);
+    setProduceError(null);
+    try {
+      await ensureProjectSyncedOnServer(targetProject);
+      const firstFrame = targetSeq.storyboardFrames?.[0];
+      const prompt =
+        failureCtx?.prompt ||
+        (firstFrame
+          ? `${firstFrame.veoMotionPrompt} (${firstFrame.visualPrompt})`
+          : targetSeq.hyperRealisticPrompt || targetSeq.directorVision || targetSeq.logline);
+      const aspectRatio = failureCtx?.aspectRatio || (targetSeq.aspectRatio === '9:16' ? '9:16' : '16:9');
+      const duration = failureCtx?.duration || '6s';
+
+      const res = await fetch('/api/generate-video', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-user-id': currentUid,
+          ...(isAdminSession && adminToken ? { Authorization: `Bearer ${adminToken}` } : {}),
+        },
+        body: JSON.stringify({
+          projectId: targetProject.id,
+          sequenceId: targetSeq.id,
+          frameId: failureCtx?.frameId || firstFrame?.id,
+          prompt,
+          aspectRatio,
+          duration,
+          imageUrl: firstFrame?.imageUrl,
+          asyncJob: true,
+        }),
+      });
+      const data = await parseApiResponse<{
+        status?: string;
+        jobId?: string;
+        project?: ProductionProject;
+        provider?: string;
+      }>(res, 'La API de generación manual no pudo iniciar el renderizado de video.');
+
+      let finalProj: ProductionProject | null = data.project || null;
+      if (data.status === 'pending' && data.jobId) {
+        setAdminVideoStatusNotice('Renderizando clip con la API de video configurada manualmente...');
+        finalProj = await pollVideoJobForApp(data.jobId);
+      }
+
+      if (finalProj) {
+        await handleProjectMediaUpdated(finalProj);
+      }
+      setFrameoFallbackFailure(null);
+      setShowInlineManualApiForm(false);
+      setAdminVideoStatusNotice(
+        `Video generado con éxito usando tu API manual (${data.provider || 'API de Respaldo'}).`
+      );
+      setActiveTab('storyboard');
+    } catch (err) {
+      setManualVideoFeedback({
+        ok: false,
+        text:
+          err instanceof Error
+            ? err.message
+            : 'No se pudo generar el video con la API manual configurada.',
+      });
+    } finally {
+      setRetryingManualVideo(false);
+    }
+  }
+
   async function handleProduce(formData: FormData): Promise<ProductionProject | null> {
     setIsProducing(true);
     setProduceError(null);
+    setAdminVideoStatusNotice(null);
+    setFrameoFallbackFailure(null);
     try {
       await ensureProjectSyncedOnServer(activeProject);
       const res = await fetch('/api/produce', {
         method: 'POST',
-        headers: { 'x-user-id': currentUid },
+        headers: {
+          'x-user-id': currentUid,
+          ...(isAdminSession && adminToken
+            ? { Authorization: `Bearer ${adminToken}` }
+            : {}),
+        },
         body: formData,
       });
       const data = await parseApiResponse<{
         project: ProductionProject;
         sequence: ProductionSequence;
       }>(res, 'Error en la producción cinematográfica.');
-      const updatedProj = data.project;
+      let updatedProj = data.project;
       const newSeq = data.sequence;
       setProjects((prev) => {
         const next = prev.map((p) => (p.id === updatedProj.id ? updatedProj : p));
@@ -581,10 +895,28 @@ export default function App() {
         return next;
       });
       setActiveSequenceId(newSeq.id);
-      setActiveTab('vision');
-      setExternalGuideScope('sequence');
-      setExternalGuideAutoDelivered(true);
-      setExternalGuideOpen(true);
+
+      // Perfil 'Admin': utilizar específicamente el servicio de generación de video de Frameo IA
+      if (isAdminSession) {
+        const frameoOutcome = await runFrameoVideoForSequence(updatedProj, newSeq);
+        if (frameoOutcome.ok) {
+          if (frameoOutcome.project) {
+            updatedProj = frameoOutcome.project;
+          }
+          setActiveTab('storyboard');
+          setExternalGuideScope('sequence');
+          setExternalGuideAutoDelivered(true);
+          setExternalGuideOpen(true);
+        } else {
+          // Mostrar inmediatamente la secuencia producida y el panel de configuración manual de API
+          setActiveTab('vision');
+        }
+      } else {
+        setActiveTab('vision');
+        setExternalGuideScope('sequence');
+        setExternalGuideAutoDelivered(true);
+        setExternalGuideOpen(true);
+      }
 
       if (!skipCloudSync) {
         try {
@@ -1184,6 +1516,7 @@ export default function App() {
                   userId={currentUid}
                   project={activeProject}
                   studioSettings={studioSettings}
+                  isAdmin={isAdminSession}
                   isProducing={isProducing}
                   errorMessage={produceError}
                   onDismissError={() => setProduceError(null)}
@@ -1202,11 +1535,279 @@ export default function App() {
                   : 'xl:overflow-y-auto p-6 lg:p-8'
               }`}
             >
+              {/* Admin Frameo IA Video Status / Manual API Fallback Recovery Panel */}
+              {!hideChromeForReading && isAdminSession && adminVideoStatusNotice && (
+                <div className="mb-4 rounded-xl border border-teal-600/35 dark:border-[#38B2AC]/40 bg-teal-50 dark:bg-[#102625] px-4 py-3 flex items-center justify-between gap-3">
+                  <div className="flex items-center gap-2 text-xs text-teal-800 dark:text-[#A7F3D0]">
+                    <CheckCircle2 className="w-4 h-4 shrink-0" />
+                    <span>{adminVideoStatusNotice}</span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setAdminVideoStatusNotice(null)}
+                    aria-label="Cerrar aviso de video Admin"
+                    className="p-1 rounded text-teal-700 dark:text-[#5EEAD4] hover:bg-black/5 dark:hover:bg-white/10"
+                  >
+                    <X className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              )}
+
+              {!hideChromeForReading && isAdminSession && frameoFallbackFailure && (
+                <section
+                  role="alert"
+                  aria-label="Respaldo manual cuando falla Frameo IA"
+                  className="mb-5 rounded-xl border border-amber-500/50 dark:border-[#E5A93C]/50 bg-amber-50 dark:bg-[#1A140B] p-4 sm:p-5 space-y-4"
+                >
+                  <div className="flex flex-wrap items-start justify-between gap-3">
+                    <div className="flex items-start gap-2.5 max-w-2xl">
+                      <AlertTriangle className="w-5 h-5 text-amber-700 dark:text-[#E5A93C] shrink-0 mt-0.5" />
+                      <div className="space-y-1">
+                        <h2 className="text-xs sm:text-sm font-semibold text-[#18181B] dark:text-[#F2F0EB]">
+                          El servicio de generación de video Frameo IA no funcionó
+                        </h2>
+                        <p className="text-xs text-[#3F3F46] dark:text-[#D4CFC7] leading-relaxed">
+                          {frameoFallbackFailure.message}
+                        </p>
+                        <p className="text-[11px] text-[#57534E] dark:text-[#9A968E]">
+                          La secuencia fue dirigida por Arthur. Configura manualmente una API de generación
+                          de video (free o de pago) para renderizar el video de la secuencia sin perder tu trabajo.
+                        </p>
+                      </div>
+                    </div>
+
+                    <div className="flex flex-wrap items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setShowInlineManualApiForm((v) => !v)}
+                        className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#E5A93C] hover:bg-[#EDA949] text-[#0B0B0E] text-xs font-semibold whitespace-nowrap"
+                      >
+                        <PlugZap className="w-3.5 h-3.5" />
+                        <span>
+                          {showInlineManualApiForm
+                            ? 'Ocultar configuración manual'
+                            : 'Configurar API manualmente'}
+                        </span>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => setSettingsOpen(true)}
+                        className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-[#D6D1C7] dark:border-white/15 bg-[#FFFFFF] dark:bg-[#14141B] hover:border-[#E5A93C] text-xs font-medium text-[#18181B] dark:text-[#F2F0EB] whitespace-nowrap"
+                      >
+                        <Film className="w-3.5 h-3.5 text-amber-600 dark:text-[#E5A93C]" />
+                        <span>Abrir Configuración Completa</span>
+                      </button>
+
+                      {providersStatus?.video?.configured && (
+                        <button
+                          type="button"
+                          disabled={retryingManualVideo}
+                          onClick={() => void handleRetryWithManualVideoApi()}
+                          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-teal-600/40 dark:border-[#38B2AC]/45 bg-teal-50 hover:bg-teal-100 dark:bg-[#102625] dark:hover:bg-[#163433] text-xs font-semibold text-teal-800 dark:text-[#5EEAD4] whitespace-nowrap disabled:opacity-60"
+                        >
+                          <Film className="w-3.5 h-3.5" />
+                          <span>
+                            {retryingManualVideo
+                              ? 'Generando con API Manual...'
+                              : `Reintentar con ${providersStatus.video.label}`}
+                          </span>
+                        </button>
+                      )}
+
+                      <button
+                        type="button"
+                        onClick={() => setFrameoFallbackFailure(null)}
+                        aria-label="Descartar aviso de respaldo manual"
+                        className="p-1.5 rounded-lg text-[#57534E] dark:text-[#9A968E] hover:bg-black/5 dark:hover:bg-white/10"
+                      >
+                        <X className="w-4 h-4" />
+                      </button>
+                    </div>
+                  </div>
+
+                  {showInlineManualApiForm && (
+                    <form
+                      onSubmit={(e) => {
+                        e.preventDefault();
+                        void handleSaveManualVideoApi(true);
+                      }}
+                      className="pt-3 border-t border-amber-500/30 dark:border-white/10 space-y-3"
+                    >
+                      <div className="text-xs font-semibold text-[#18181B] dark:text-[#F2F0EB]">
+                        Configuración Manual Rápida de API de Video (Free o Pago)
+                      </div>
+
+                      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-2.5">
+                        <div>
+                          <label
+                            htmlFor="manual-video-preset"
+                            className="block text-[11px] font-medium text-[#3F3F46] dark:text-[#C8C3BA] mb-1"
+                          >
+                            Proveedor de Video
+                          </label>
+                          <select
+                            id="manual-video-preset"
+                            value={manualVideoForm.providerHint}
+                            onChange={(e) => {
+                              const nextId = e.target.value as ApiProviderKind | 'auto';
+                              const preset = VIDEO_PROVIDER_PRESETS.find((p) => p.id === nextId);
+                              setManualVideoForm((prev) => ({
+                                ...prev,
+                                providerHint: nextId,
+                                endpointUrl:
+                                  preset?.defaultEndpointUrl ||
+                                  (nextId === 'auto' ? prev.endpointUrl : ''),
+                                model:
+                                  preset?.defaultModel || (nextId === 'auto' ? prev.model : ''),
+                                tierHint:
+                                  preset?.tierLabel === 'Free'
+                                    ? 'free'
+                                    : preset?.tierLabel === 'Pago'
+                                      ? 'paid'
+                                      : 'auto',
+                              }));
+                            }}
+                            className="w-full rounded-lg border border-[#D6D1C7] dark:border-white/12 bg-[#FFFFFF] dark:bg-[#0B0B0E] px-2.5 py-1.5 text-xs text-[#18181B] dark:text-[#F2F0EB] focus:border-[#E5A93C] focus:outline-none"
+                          >
+                            {VIDEO_PROVIDER_PRESETS.map((p) => (
+                              <option key={p.id} value={p.id}>
+                                {p.label}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+
+                        <div>
+                          <label
+                            htmlFor="manual-video-tier"
+                            className="block text-[11px] font-medium text-[#3F3F46] dark:text-[#C8C3BA] mb-1"
+                          >
+                            Tipo de API
+                          </label>
+                          <select
+                            id="manual-video-tier"
+                            value={manualVideoForm.tierHint}
+                            onChange={(e) =>
+                              setManualVideoForm((prev) => ({
+                                ...prev,
+                                tierHint: e.target.value as ApiBillingTier,
+                              }))
+                            }
+                            className="w-full rounded-lg border border-[#D6D1C7] dark:border-white/12 bg-[#FFFFFF] dark:bg-[#0B0B0E] px-2.5 py-1.5 text-xs text-[#18181B] dark:text-[#F2F0EB] focus:border-[#E5A93C] focus:outline-none"
+                          >
+                            <option value="auto">Auto-detectar</option>
+                            <option value="free">Gratuita (Free)</option>
+                            <option value="paid">De Pago</option>
+                          </select>
+                        </div>
+
+                        <div>
+                          <label
+                            htmlFor="manual-video-url"
+                            className="block text-[11px] font-medium text-[#3F3F46] dark:text-[#C8C3BA] mb-1"
+                          >
+                            URL Endpoint HTTPS
+                          </label>
+                          <input
+                            id="manual-video-url"
+                            type="url"
+                            value={manualVideoForm.endpointUrl}
+                            onChange={(e) =>
+                              setManualVideoForm((prev) => ({
+                                ...prev,
+                                endpointUrl: e.target.value,
+                              }))
+                            }
+                            placeholder="https://api.tu-proveedor-video.com/v1/generate"
+                            className="w-full rounded-lg border border-[#D6D1C7] dark:border-white/12 bg-[#FFFFFF] dark:bg-[#0B0B0E] px-2.5 py-1.5 text-xs font-mono-tech text-[#18181B] dark:text-[#F2F0EB] focus:border-[#E5A93C] focus:outline-none"
+                          />
+                        </div>
+
+                        <div>
+                          <label
+                            htmlFor="manual-video-key"
+                            className="block text-[11px] font-medium text-[#3F3F46] dark:text-[#C8C3BA] mb-1"
+                          >
+                            API Key / Token
+                          </label>
+                          <input
+                            id="manual-video-key"
+                            type="password"
+                            autoComplete="off"
+                            value={manualVideoForm.apiKey}
+                            onChange={(e) =>
+                              setManualVideoForm((prev) => ({
+                                ...prev,
+                                apiKey: e.target.value,
+                              }))
+                            }
+                            placeholder="hf_..., r8_..., AIza..., sk-..."
+                            className="w-full rounded-lg border border-[#D6D1C7] dark:border-white/12 bg-[#FFFFFF] dark:bg-[#0B0B0E] px-2.5 py-1.5 text-xs font-mono-tech text-[#18181B] dark:text-[#F2F0EB] focus:border-[#E5A93C] focus:outline-none"
+                          />
+                        </div>
+                      </div>
+
+                      <div className="flex flex-wrap items-center justify-between gap-3">
+                        <div className="flex-1 min-w-[200px] max-w-xs">
+                          <input
+                            aria-label="Modelo manual de video"
+                            type="text"
+                            value={manualVideoForm.model}
+                            onChange={(e) =>
+                              setManualVideoForm((prev) => ({ ...prev, model: e.target.value }))
+                            }
+                            placeholder="Modelo (opcional, ej. Wan2.1-T2V-14B)"
+                            className="w-full rounded-lg border border-[#D6D1C7] dark:border-white/12 bg-[#FFFFFF] dark:bg-[#0B0B0E] px-2.5 py-1.5 text-xs font-mono-tech text-[#18181B] dark:text-[#F2F0EB] focus:border-[#E5A93C] focus:outline-none"
+                          />
+                        </div>
+
+                        <div className="flex flex-wrap items-center gap-2">
+                          <button
+                            type="button"
+                            disabled={savingManualVideoApi || retryingManualVideo}
+                            onClick={() => void handleSaveManualVideoApi(false)}
+                            className="px-3 py-1.5 rounded-lg border border-[#D6D1C7] dark:border-white/15 bg-[#FFFFFF] dark:bg-[#14141B] hover:border-[#E5A93C] text-xs font-medium text-[#18181B] dark:text-[#F2F0EB] disabled:opacity-60"
+                          >
+                            {savingManualVideoApi ? 'Validando...' : 'Solo guardar API'}
+                          </button>
+                          <button
+                            type="submit"
+                            disabled={savingManualVideoApi || retryingManualVideo}
+                            className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg bg-[#E5A93C] hover:bg-[#EDA949] text-[#0B0B0E] text-xs font-semibold disabled:opacity-60"
+                          >
+                            <Film className="w-3.5 h-3.5" />
+                            <span>
+                              {savingManualVideoApi || retryingManualVideo
+                                ? 'Procesando...'
+                                : 'Guardar API Manual y Generar Video'}
+                            </span>
+                          </button>
+                        </div>
+                      </div>
+
+                      {manualVideoFeedback && (
+                        <p
+                          className={`text-xs ${
+                            manualVideoFeedback.ok
+                              ? 'text-teal-700 dark:text-[#5EEAD4]'
+                              : 'text-rose-700 dark:text-rose-300'
+                          }`}
+                        >
+                          {manualVideoFeedback.text}
+                        </p>
+                      )}
+                    </form>
+                  )}
+                </section>
+              )}
+
               {activeTab === 'trailer' && activeProject ? (
                 <TrailerView
                   userId={currentUid}
                   project={activeProject}
                   studioSettings={studioSettings}
+                  adminToken={adminToken}
                   providersStatus={providersStatus}
                   onEnsureProjectSynced={() => ensureProjectSyncedOnServer(activeProject)}
                   onProjectUpdated={handleProjectMediaUpdated}
@@ -1217,11 +1818,14 @@ export default function App() {
                 <div className="py-20 max-w-md mx-auto text-center space-y-3">
                   <Clapperboard className="w-8 h-8 text-amber-600 dark:text-[#E5A93C] mx-auto" />
                   <h2 className="font-display text-lg font-semibold text-[#18181B] dark:text-[#F2F0EB]">
-                    Agente Arthur dirigiendo producción
+                    {isAdminSession
+                      ? 'Agente Arthur produciendo con Frameo IA'
+                      : 'Agente Arthur dirigiendo producción'}
                   </h2>
                   <p className="text-xs text-[#57534E] dark:text-[#9A968E] leading-relaxed">
-                    Estructurando óptica de cámara, temperaturas de luz, lista de planos, mezcla
-                    Dolby Atmos, voces en off realistas, VFX, guion y guía paso a paso externa.
+                    {isAdminSession
+                      ? 'Estructurando guion técnico, anclajes de continuidad y ejecutando el servicio de generación de video de Frameo IA.'
+                      : 'Estructurando óptica de cámara, temperaturas de luz, lista de planos, mezcla Dolby Atmos, voces en off realistas, VFX, guion y guía paso a paso externa.'}
                   </p>
                 </div>
               ) : activeSequence && activeProject ? (
@@ -1281,6 +1885,7 @@ export default function App() {
                       projectId={activeProject.id}
                       sequence={activeSequence}
                       defaultResolution={studioSettings.defaultResolution}
+                      adminToken={adminToken}
                       providersStatus={providersStatus}
                       onEnsureProjectSynced={() => ensureProjectSyncedOnServer(activeProject)}
                       onProjectMediaUpdated={handleProjectMediaUpdated}
@@ -1384,6 +1989,9 @@ export default function App() {
           onAddLesson={handleAddLesson}
           onDeleteLesson={handleDeleteLesson}
           onProjectSeeded={handleProjectSeeded}
+          onEnsureProjectSynced={() => ensureProjectSyncedOnServer(activeProject)}
+          onProjectUpdated={handleProjectMediaUpdated}
+          onProvidersChanged={setProvidersStatus}
         />
       )}
 
@@ -1399,10 +2007,18 @@ export default function App() {
       <StudioSettingsModal
         open={settingsOpen}
         userId={currentUid}
+        isAdmin={isAdminSession}
+        adminToken={adminToken}
+        frameoFailureReason={frameoFallbackFailure?.message || null}
         settings={studioSettings}
         onClose={() => setSettingsOpen(false)}
         onSaveSettings={handleSaveStudioSettings}
         onProvidersChanged={setProvidersStatus}
+        onRetryWithManualVideoApi={
+          isAdminSession && frameoFallbackFailure
+            ? () => void handleRetryWithManualVideoApi()
+            : undefined
+        }
       />
 
       <ExternalProductionGuideModal

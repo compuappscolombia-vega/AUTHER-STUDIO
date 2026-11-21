@@ -3,9 +3,13 @@ import {
   Activity,
   AlertTriangle,
   BookOpen,
+  Check,
   CheckCircle2,
+  Clapperboard,
+  Copy,
   Cpu,
   FlaskConical,
+  PlugZap,
   Plus,
   Save,
   Sparkles,
@@ -16,6 +20,9 @@ import {
 import type {
   AdminAgentProfile,
   AgentDiagnosticReport,
+  ApiCapability,
+  ApiProviderPublicSummary,
+  FrameoMcpToolSummary,
   LearningCategory,
   LearningLesson,
   ProductionProject,
@@ -23,6 +30,10 @@ import type {
 } from '../types/studio';
 import {
   DEFAULT_ADMIN_AGENT_PROFILE,
+  FRAMEO_MODEL_CATALOG,
+  FRAMEO_STYLE_PRESETS,
+  FRAMEO_VFX_MANTO_MODES,
+  buildFrameoShotFilename,
   computeSequenceDiagnostics,
   validateAdminDirective,
 } from '../utils/adminAndStoryboardLogic';
@@ -44,9 +55,12 @@ interface AdminAgentLabModalProps {
   }) => Promise<void>;
   onDeleteLesson: (lessonId: string) => Promise<void>;
   onProjectSeeded: (projects: ProductionProject[], seededProjectId: string) => void;
+  onEnsureProjectSynced: () => Promise<void>;
+  onProjectUpdated: (project: ProductionProject) => Promise<void>;
+  onProvidersChanged?: (providers: Record<ApiCapability, ApiProviderPublicSummary>) => void;
 }
 
-type LabTab = 'inspect' | 'teach' | 'audit';
+type LabTab = 'inspect' | 'teach' | 'audit' | 'frameo';
 
 interface ActiveModelItem {
   role: string;
@@ -64,18 +78,38 @@ export function AdminAgentLabModal({
   onAddLesson,
   onDeleteLesson,
   onProjectSeeded,
+  onEnsureProjectSynced,
+  onProjectUpdated,
+  onProvidersChanged,
 }: AdminAgentLabModalProps) {
   const [tab, setTab] = useState<LabTab>('inspect');
   const [loadingProfile, setLoadingProfile] = useState(false);
   const [savingProfile, setSavingProfile] = useState(false);
   const [seedingProject, setSeedingProject] = useState(false);
   const [auditing, setAuditing] = useState(false);
+  const [generatingFrameo, setGeneratingFrameo] = useState(false);
+  const [copiedKey, setCopiedKey] = useState<string | null>(null);
 
   const [profile, setProfile] = useState<AdminAgentProfile>(DEFAULT_ADMIN_AGENT_PROFILE);
   const [baseInstruction, setBaseInstruction] = useState('');
   const [effectiveInstruction, setEffectiveInstruction] = useState('');
   const [activeModels, setActiveModels] = useState<ActiveModelItem[]>([]);
   const [diagnosticReport, setDiagnosticReport] = useState<AgentDiagnosticReport | null>(null);
+
+  // Frameo.AI MCP (https://mcp.frameo.ai/mcp) OAuth & Tool State
+  const [frameoEndpointUrl, setFrameoEndpointUrl] = useState('https://mcp.frameo.ai/mcp');
+  const [frameoApiKey, setFrameoApiKey] = useState('');
+  const [frameoModelName, setFrameoModelName] = useState<string>(FRAMEO_MODEL_CATALOG[0]);
+  const [savingFrameoConn, setSavingFrameoConn] = useState(false);
+  const [frameoConnSummary, setFrameoConnSummary] = useState<ApiProviderPublicSummary | null>(null);
+  const [mcpConnected, setMcpConnected] = useState(false);
+  const [mcpServerName, setMcpServerName] = useState('Frameo.AI MCP');
+  const [mcpTools, setMcpTools] = useState<FrameoMcpToolSummary[]>([]);
+  const [mcpBusy, setMcpBusy] = useState(false);
+  const [mcpPopupFallbackUrl, setMcpPopupFallbackUrl] = useState<string | null>(null);
+  const [selectedMcpTool, setSelectedMcpTool] = useState('');
+  const [mcpToolArgsJson, setMcpToolArgsJson] = useState('{}');
+  const [mcpToolResultText, setMcpToolResultText] = useState<string | null>(null);
 
   const [quickCategory, setQuickCategory] = useState<LearningCategory>('continuity');
   const [quickInsight, setQuickInsight] = useState('');
@@ -94,6 +128,79 @@ export function AdminAgentLabModal({
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
   }, [open, adminToken, onClose]);
+
+  useEffect(() => {
+    if (!open || !adminToken) return;
+    function onOAuthMessage(event: MessageEvent) {
+      const origin = event.origin || '';
+      if (
+        origin !== window.location.origin &&
+        !origin.endsWith('.run.app') &&
+        !origin.includes('localhost')
+      ) {
+        return;
+      }
+      const data = event.data as {
+        type?: string;
+        toolsCount?: number;
+        serverName?: string;
+        providers?: Record<ApiCapability, ApiProviderPublicSummary>;
+        error?: string;
+      } | null;
+      if (!data || typeof data !== 'object') return;
+      if (data.type === 'FRAMEO_MCP_OAUTH_SUCCESS') {
+        setMcpPopupFallbackUrl(null);
+        setMcpConnected(true);
+        if (data.serverName) setMcpServerName(data.serverName);
+        if (data.providers) {
+          onProvidersChanged?.(data.providers);
+          if (data.providers.frameo_video) {
+            setFrameoConnSummary(data.providers.frameo_video);
+          }
+        }
+        setNotice(
+          `Frameo.AI MCP conectado vía OAuth (${data.toolsCount ?? 0} herramientas sincronizadas).`
+        );
+        void fetchFrameoMcpStatus();
+      } else if (data.type === 'FRAMEO_MCP_OAUTH_ERROR') {
+        setError(data.error || 'No se pudo completar la autenticación OAuth en Frameo.AI.');
+      }
+    }
+    window.addEventListener('message', onOAuthMessage);
+    return () => window.removeEventListener('message', onOAuthMessage);
+  }, [open, adminToken]);
+
+  async function fetchFrameoMcpStatus() {
+    if (!adminToken) return;
+    try {
+      const res = await fetch('/api/admin/frameo-mcp/status', {
+        headers: {
+          'x-user-id': userId,
+          Authorization: `Bearer ${adminToken}`,
+        },
+      });
+      const data = await res.json();
+      if (!res.ok) return;
+      if (data.status) {
+        setMcpConnected(Boolean(data.status.connected));
+        if (data.status.serverName) setMcpServerName(String(data.status.serverName));
+        if (Array.isArray(data.status.tools)) {
+          setMcpTools(data.status.tools);
+          if (data.status.tools.length > 0 && !selectedMcpTool) {
+            setSelectedMcpTool(data.status.tools[0].name);
+          }
+        }
+      }
+      if (data.providers) {
+        onProvidersChanged?.(data.providers as Record<ApiCapability, ApiProviderPublicSummary>);
+        if (data.providers.frameo_video) {
+          setFrameoConnSummary(data.providers.frameo_video as ApiProviderPublicSummary);
+        }
+      }
+    } catch {
+      // Ignore background refresh failure
+    }
+  }
 
   useEffect(() => {
     if (!open || !adminToken) return;
@@ -117,6 +224,26 @@ export function AdminAgentLabModal({
         setBaseInstruction(String(data.baseSystemInstruction || ''));
         setEffectiveInstruction(String(data.effectiveSystemInstruction || ''));
         setActiveModels(Array.isArray(data.activeModels) ? data.activeModels : []);
+        const frameoSummary = data.providers?.frameo_video as
+          | ApiProviderPublicSummary
+          | undefined;
+        if (frameoSummary) {
+          setFrameoConnSummary(frameoSummary);
+          if (frameoSummary.endpointUrl) setFrameoEndpointUrl(frameoSummary.endpointUrl);
+          if (frameoSummary.model) setFrameoModelName(frameoSummary.model);
+        }
+        if (data.frameoMcpStatus) {
+          setMcpConnected(Boolean(data.frameoMcpStatus.connected));
+          if (data.frameoMcpStatus.serverName) {
+            setMcpServerName(String(data.frameoMcpStatus.serverName));
+          }
+          if (Array.isArray(data.frameoMcpStatus.tools)) {
+            setMcpTools(data.frameoMcpStatus.tools);
+            if (data.frameoMcpStatus.tools.length > 0) {
+              setSelectedMcpTool(data.frameoMcpStatus.tools[0].name);
+            }
+          }
+        }
       } catch (err) {
         if (!cancelled) {
           setError(err instanceof Error ? err.message : 'Error cargando inspección.');
@@ -135,12 +262,11 @@ export function AdminAgentLabModal({
 
   const localMetrics = computeSequenceDiagnostics(activeProject, activeSequence);
 
-  async function handleSaveProfile(e: React.FormEvent) {
-    e.preventDefault();
+  async function persistAdminProfile(nextProfile: AdminAgentProfile, successMsg: string) {
     if (!adminToken) return;
     setError(null);
     setNotice(null);
-    const check = validateAdminDirective(profile.customDirectives);
+    const check = validateAdminDirective(nextProfile.customDirectives);
     if (!check.valid) {
       setError(check.error || 'Directiva inválida.');
       return;
@@ -155,7 +281,7 @@ export function AdminAgentLabModal({
           'x-user-id': userId,
           Authorization: `Bearer ${adminToken}`,
         },
-        body: JSON.stringify(profile),
+        body: JSON.stringify(nextProfile),
       });
       const data = await res.json();
       if (!res.ok) {
@@ -165,13 +291,282 @@ export function AdminAgentLabModal({
       if (data.effectiveSystemInstruction) {
         setEffectiveInstruction(String(data.effectiveSystemInstruction));
       }
-      setNotice(
-        'Directivas guardadas. El Agente Director las aplicará en cada nueva secuencia, storyboard de 4 frames y tráiler.'
-      );
+      setNotice(successMsg);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Error guardando directivas.');
+      setError(err instanceof Error ? err.message : 'Error guardando configuración.');
     } finally {
       setSavingProfile(false);
+    }
+  }
+
+  async function handleSaveProfile(e: React.FormEvent) {
+    e.preventDefault();
+    await persistAdminProfile(
+      profile,
+      'Directivas guardadas. El Agente Director las aplicará en cada nueva secuencia, storyboard de 4 frames y tráiler.'
+    );
+  }
+
+  async function handleSaveFrameoSettings(e: React.FormEvent) {
+    e.preventDefault();
+    await persistAdminProfile(
+      profile,
+      'Configuración de ArthurAgent · Frameo IA guardada para el perfil Administrador.'
+    );
+  }
+
+  async function handleGenerateFrameoPackage() {
+    if (!adminToken) return;
+    if (!activeProject || !activeSequence) {
+      setError('Selecciona o carga primero un proyecto con al menos una secuencia.');
+      return;
+    }
+    setGeneratingFrameo(true);
+    setError(null);
+    setNotice(null);
+    try {
+      await onEnsureProjectSynced();
+      const res = await fetch('/api/admin/generate-frameo-package', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-user-id': userId,
+          Authorization: `Bearer ${adminToken}`,
+        },
+        body: JSON.stringify({
+          projectId: activeProject.id,
+          sequenceId: activeSequence.id,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.error || 'No se pudo generar el paquete Frameo IA.');
+      }
+      if (data.project) {
+        await onProjectUpdated(data.project as ProductionProject);
+      }
+      setNotice(
+        `Paquete Frameo IA generado para "${activeSequence.title}" (${data.frameoProductionSpec?.scenes?.length || 0} escenas listas).`
+      );
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Error generando paquete Frameo IA.');
+    } finally {
+      setGeneratingFrameo(false);
+    }
+  }
+
+  async function handleSaveFrameoConnector(e: React.FormEvent) {
+    e.preventDefault();
+    if (!adminToken) return;
+    if (!frameoEndpointUrl.trim() && !frameoApiKey.trim()) {
+      setError('Ingresa al menos la URL del endpoint privado o la clave API compatible con Frameo IA.');
+      return;
+    }
+    setSavingFrameoConn(true);
+    setError(null);
+    setNotice(null);
+    try {
+      const res = await fetch('/api/providers/detect', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-user-id': userId,
+          Authorization: `Bearer ${adminToken}`,
+        },
+        body: JSON.stringify({
+          capability: 'frameo_video',
+          providerHint: 'auto',
+          tierHint: 'paid',
+          label: 'Frameo IA · Servicio de Video Admin',
+          endpointUrl: frameoEndpointUrl.trim(),
+          apiKey: frameoApiKey.trim(),
+          model: frameoModelName.trim() || 'frameo-cinema-v1',
+          save: true,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.error || 'No se pudo validar el conector privado de Frameo IA.');
+      }
+      if (data.providers) {
+        onProvidersChanged?.(data.providers as Record<ApiCapability, ApiProviderPublicSummary>);
+        if (data.providers.frameo_video) {
+          setFrameoConnSummary(data.providers.frameo_video as ApiProviderPublicSummary);
+        }
+      }
+      setFrameoApiKey('');
+      setNotice(
+        data.diagnostics ||
+          data.message ||
+          'Conector privado Frameo IA almacenado en la bóveda del Administrador.'
+      );
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Error conectando API privada de Frameo IA.');
+    } finally {
+      setSavingFrameoConn(false);
+    }
+  }
+
+  async function handleDisconnectFrameoConnector() {
+    if (!adminToken) return;
+    setSavingFrameoConn(true);
+    setError(null);
+    setNotice(null);
+    try {
+      await fetch('/api/admin/frameo-mcp/disconnect', {
+        method: 'DELETE',
+        headers: {
+          'x-user-id': userId,
+          Authorization: `Bearer ${adminToken}`,
+        },
+      }).catch(() => null);
+
+      const res = await fetch('/api/providers/frameo_video', {
+        method: 'DELETE',
+        headers: {
+          'x-user-id': userId,
+          Authorization: `Bearer ${adminToken}`,
+        },
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.error || 'No se pudo desconectar el servicio Frameo IA.');
+      }
+      if (data.providers) {
+        onProvidersChanged?.(data.providers as Record<ApiCapability, ApiProviderPublicSummary>);
+        setFrameoConnSummary((data.providers.frameo_video as ApiProviderPublicSummary) || null);
+      }
+      setMcpConnected(false);
+      setMcpTools([]);
+      setMcpPopupFallbackUrl(null);
+      setFrameoEndpointUrl('https://mcp.frameo.ai/mcp');
+      setNotice('Servicio de video Frameo IA / MCP desconectado.');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Error desconectando servicio Frameo IA.');
+    } finally {
+      setSavingFrameoConn(false);
+    }
+  }
+
+  async function handleConnectFrameoOAuth() {
+    if (!adminToken) return;
+    setMcpBusy(true);
+    setError(null);
+    setNotice(null);
+    setMcpPopupFallbackUrl(null);
+    try {
+      const targetUrl = frameoEndpointUrl.trim() || 'https://mcp.frameo.ai/mcp';
+      const qs = new URLSearchParams({
+        mcpUrl: targetUrl,
+        origin: window.location.origin,
+      });
+      const res = await fetch(`/api/admin/frameo-mcp/auth-url?${qs.toString()}`, {
+        headers: {
+          'x-user-id': userId,
+          Authorization: `Bearer ${adminToken}`,
+        },
+      });
+      const data = await res.json();
+      if (!res.ok || !data.authUrl) {
+        throw new Error(data.error || 'No se pudo generar la URL de autorización OAuth de Frameo.AI.');
+      }
+      const popup = window.open(
+        String(data.authUrl),
+        'frameo_mcp_oauth',
+        'width=620,height=740,noopener=no'
+      );
+      if (!popup) {
+        setMcpPopupFallbackUrl(String(data.authUrl));
+        setNotice(
+          'Tu navegador bloqueó la ventana emergente. Usa el enlace directo de autorización de Frameo.AI debajo.'
+        );
+      } else {
+        setNotice('Autoriza el acceso en la ventana de Frameo.AI para completar la conexión MCP.');
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Error iniciando OAuth con Frameo.AI.');
+    } finally {
+      setMcpBusy(false);
+    }
+  }
+
+  async function handleRefreshFrameoMcpTools() {
+    if (!adminToken) return;
+    setMcpBusy(true);
+    setError(null);
+    setNotice(null);
+    try {
+      const res = await fetch('/api/admin/frameo-mcp/refresh-tools', {
+        method: 'POST',
+        headers: {
+          'x-user-id': userId,
+          Authorization: `Bearer ${adminToken}`,
+        },
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.error || 'No se pudieron sincronizar herramientas MCP.');
+      }
+      if (Array.isArray(data.tools)) {
+        setMcpTools(data.tools);
+        if (data.tools.length > 0 && !selectedMcpTool) {
+          setSelectedMcpTool(data.tools[0].name);
+        }
+      }
+      if (data.providers) {
+        onProvidersChanged?.(data.providers as Record<ApiCapability, ApiProviderPublicSummary>);
+        if (data.providers.frameo_video) {
+          setFrameoConnSummary(data.providers.frameo_video as ApiProviderPublicSummary);
+        }
+      }
+      setMcpConnected(true);
+      setNotice(`Sincronización MCP completada: ${data.tools?.length || 0} herramientas disponibles.`);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Error sincronizando MCP de Frameo.AI.');
+    } finally {
+      setMcpBusy(false);
+    }
+  }
+
+  async function handleRunMcpToolTest(e: React.FormEvent) {
+    e.preventDefault();
+    if (!adminToken || !selectedMcpTool) return;
+    setMcpBusy(true);
+    setError(null);
+    setMcpToolResultText(null);
+    try {
+      const parsedArgs = mcpToolArgsJson.trim() ? JSON.parse(mcpToolArgsJson) : {};
+      const res = await fetch('/api/admin/frameo-mcp/call-tool', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-user-id': userId,
+          Authorization: `Bearer ${adminToken}`,
+        },
+        body: JSON.stringify({
+          toolName: selectedMcpTool,
+          arguments: parsedArgs,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.error || 'Error ejecutando herramienta Frameo MCP.');
+      }
+      setMcpToolResultText(JSON.stringify(data.result, null, 2));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Error ejecutando herramienta MCP.');
+    } finally {
+      setMcpBusy(false);
+    }
+  }
+
+  async function handleCopyText(key: string, text: string) {
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopiedKey(key);
+      setTimeout(() => setCopiedKey(null), 1500);
+    } catch {
+      // Clipboard blocked
     }
   }
 
@@ -349,6 +744,20 @@ export function AdminAgentLabModal({
           >
             <FlaskConical className="w-3.5 h-3.5" />
             <span>Auditoría de Secuencia</span>
+          </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={tab === 'frameo'}
+            onClick={() => setTab('frameo')}
+            className={`pb-3 text-xs font-semibold border-b-2 transition-colors whitespace-nowrap inline-flex items-center gap-1.5 ${
+              tab === 'frameo'
+                ? 'border-[#E5A93C] text-[#18181B] dark:text-[#F2F0EB]'
+                : 'border-transparent text-[#57534E] dark:text-[#8D8981] hover:text-[#18181B] dark:hover:text-[#E6E2DA]'
+            }`}
+          >
+            <Clapperboard className="w-3.5 h-3.5" />
+            <span>Frameo IA (ArthurAgent)</span>
           </button>
         </div>
 
@@ -818,6 +1227,606 @@ export function AdminAgentLabModal({
                   )}
                 </div>
               )}
+            </div>
+          )}
+
+          {tab === 'frameo' && (
+            <div className="space-y-6">
+              {/* Frameo.AI MCP OAuth 2.0 Connector (https://mcp.frameo.ai/mcp) */}
+              <div className="p-4 rounded-xl border border-teal-600/35 dark:border-[#38B2AC]/35 bg-teal-50/70 dark:bg-[#0D1A1A] space-y-3">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div className="space-y-0.5">
+                    <div className="flex items-center gap-2 text-xs font-semibold text-[#18181B] dark:text-[#F2F0EB]">
+                      <PlugZap className="w-4 h-4 text-teal-700 dark:text-[#5EEAD4]" />
+                      <span>Conexión Oficial Frameo.AI MCP (HTTP Streamable + OAuth)</span>
+                    </div>
+                    <p className="text-[11px] font-mono-tech text-[#57534E] dark:text-[#9A968E]">
+                      Servidor remoto: https://mcp.frameo.ai/mcp
+                    </p>
+                  </div>
+                  <span
+                    className={`px-2.5 py-1 rounded-md text-[11px] font-mono-tech font-medium ${
+                      mcpConnected
+                        ? 'bg-teal-100 dark:bg-[#143330] text-teal-800 dark:text-[#5EEAD4]'
+                        : 'bg-amber-100 dark:bg-[#2A2010] text-amber-800 dark:text-[#F4C46A]'
+                    }`}
+                  >
+                    {mcpConnected
+                      ? `Conectado (${mcpServerName} · ${mcpTools.length} tools)`
+                      : 'Sin sesión OAuth activa'}
+                  </span>
+                </div>
+
+                <p className="text-[11px] text-[#3F3F46] dark:text-[#C8C3BA] leading-relaxed">
+                  Conecta directamente tu cuenta de Frameo.AI (OAuth 2.0 PKCE + registro automático
+                  de aplicación) para que ArthurAgent acceda a modelos de frontera (Veo 3.1 Rápido,
+                  Kling O3/3.0, Semilla 2,5, MiniMax H3) y VFX Studio (Agente Manto).
+                </p>
+
+                <div className="flex flex-wrap items-center gap-2">
+                  <button
+                    type="button"
+                    disabled={mcpBusy}
+                    onClick={() => void handleConnectFrameoOAuth()}
+                    className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg bg-[#E5A93C] hover:bg-[#EDA949] disabled:opacity-60 text-[#0B0B0E] text-xs font-semibold"
+                  >
+                    <PlugZap className="w-3.5 h-3.5" />
+                    <span>
+                      {mcpBusy
+                        ? 'Conectando...'
+                        : mcpConnected
+                          ? 'Reconectar Frameo.AI (OAuth)'
+                          : 'Conectar con Frameo.AI (OAuth MCP)'}
+                    </span>
+                  </button>
+
+                  {mcpConnected && (
+                    <button
+                      type="button"
+                      disabled={mcpBusy}
+                      onClick={() => void handleRefreshFrameoMcpTools()}
+                      className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg border border-[#D6D1C7] dark:border-white/15 bg-[#FFFFFF] dark:bg-[#14141B] text-xs font-medium text-[#18181B] dark:text-[#F2F0EB]"
+                    >
+                      <Sparkles className="w-3.5 h-3.5 text-teal-600 dark:text-[#5EEAD4]" />
+                      <span>Sincronizar herramientas MCP</span>
+                    </button>
+                  )}
+
+                  {(mcpConnected || frameoConnSummary?.configured) && (
+                    <button
+                      type="button"
+                      disabled={savingFrameoConn || mcpBusy}
+                      onClick={() => void handleDisconnectFrameoConnector()}
+                      className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg border border-[#D6D1C7] dark:border-white/15 bg-[#FFFFFF] dark:bg-[#14141B] hover:bg-rose-50 dark:hover:bg-rose-950/30 text-xs font-medium text-[#57534E] hover:text-rose-700 dark:text-[#9A968E] dark:hover:text-rose-300"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                      <span>Desconectar Frameo.AI</span>
+                    </button>
+                  )}
+                </div>
+
+                {mcpPopupFallbackUrl && (
+                  <div className="p-2.5 rounded-lg border border-amber-500/40 bg-amber-50 dark:bg-[#1F180D] text-xs space-y-1">
+                    <div className="text-[#3F3F46] dark:text-[#D4CFC7]">
+                      Abre el inicio de sesión de Frameo.AI en una pestaña nueva:
+                    </div>
+                    <a
+                      href={mcpPopupFallbackUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-block font-semibold text-amber-800 dark:text-[#E5A93C] underline"
+                    >
+                      Autorizar acceso en Frameo.AI MCP
+                    </a>
+                  </div>
+                )}
+
+                {mcpTools.length > 0 && (
+                  <div className="pt-2 border-t border-teal-600/20 dark:border-white/10 space-y-2.5">
+                    <div className="text-[11px] font-semibold text-[#18181B] dark:text-[#F2F0EB]">
+                      Herramientas descubiertas en Frameo.AI MCP ({mcpTools.length})
+                    </div>
+                    <div className="flex flex-wrap gap-1.5">
+                      {mcpTools.map((t) => (
+                        <button
+                          key={t.name}
+                          type="button"
+                          onClick={() => {
+                            setSelectedMcpTool(t.name);
+                            setMcpToolArgsJson(
+                              JSON.stringify(
+                                {
+                                  prompt:
+                                    activeSequence?.hyperRealisticPrompt ||
+                                    'Escena cinematográfica 4K anamórfica',
+                                  model: profile.frameoIaModel || FRAMEO_MODEL_CATALOG[0],
+                                },
+                                null,
+                                2
+                              )
+                            );
+                          }}
+                          className={`px-2 py-1 rounded text-[11px] font-mono-tech border transition-colors ${
+                            selectedMcpTool === t.name
+                              ? 'border-[#E5A93C] bg-amber-50 dark:bg-[#221B0E] text-amber-800 dark:text-[#E5A93C]'
+                              : 'border-[#D6D1C7] dark:border-white/12 bg-[#FFFFFF] dark:bg-[#111116] text-[#3F3F46] dark:text-[#C8C3BA]'
+                          }`}
+                          title={t.description || t.name}
+                        >
+                          {t.name}
+                        </button>
+                      ))}
+                    </div>
+
+                    {selectedMcpTool && (
+                      <form onSubmit={handleRunMcpToolTest} className="space-y-2">
+                        <div className="text-[11px] text-[#57534E] dark:text-[#9A968E]">
+                          Probar herramienta <strong className="font-mono-tech">{selectedMcpTool}</strong>
+                        </div>
+                        <textarea
+                          rows={3}
+                          aria-label="Argumentos JSON MCP"
+                          value={mcpToolArgsJson}
+                          onChange={(e) => setMcpToolArgsJson(e.target.value)}
+                          className="w-full rounded-lg border border-[#D6D1C7] dark:border-white/12 bg-[#FFFFFF] dark:bg-[#0B0B0E] p-2 text-[11px] font-mono-tech text-[#18181B] dark:text-[#F2F0EB] focus:border-[#E5A93C] focus:outline-none"
+                        />
+                        <div className="flex justify-end">
+                          <button
+                            type="submit"
+                            disabled={mcpBusy}
+                            className="px-3 py-1.5 rounded-lg border border-teal-600/40 dark:border-[#38B2AC]/40 bg-teal-100/70 dark:bg-[#132928] text-xs font-semibold text-teal-900 dark:text-[#5EEAD4]"
+                          >
+                            {mcpBusy ? 'Ejecutando...' : `Ejecutar ${selectedMcpTool}`}
+                          </button>
+                        </div>
+                      </form>
+                    )}
+
+                    {mcpToolResultText && (
+                      <pre className="p-2.5 rounded-lg border border-[#D6D1C7] dark:border-white/10 bg-[#FFFFFF] dark:bg-[#0B0B0E] text-[10px] font-mono-tech text-[#3F3F46] dark:text-[#D4CFC7] max-h-40 overflow-y-auto whitespace-pre-wrap">
+                        {mcpToolResultText}
+                      </pre>
+                    )}
+                  </div>
+                )}
+              </div>
+
+              {/* Frameo IA Engine & VFX Studio (Manto) Settings (Admin only) */}
+              <form
+                onSubmit={handleSaveFrameoSettings}
+                className="p-4 rounded-xl border border-[#E2DDD3] dark:border-white/10 bg-[#FAF8F4] dark:bg-[#0B0B0E] space-y-4"
+              >
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <div>
+                    <h3 className="text-xs font-semibold text-[#18181B] dark:text-[#F2F0EB]">
+                      Motor Frameo IA y VFX Studio (Agente Manto) · Admin
+                    </h3>
+                    <p className="text-[11px] text-[#57534E] dark:text-[#8D8981] mt-0.5">
+                      Selecciona modelo de frontera Frameo, modo VFX de Manto, vista previa 480P y formato de exportación.
+                    </p>
+                  </div>
+                  <div className="flex flex-wrap items-center gap-4">
+                    <label className="inline-flex items-center gap-2 text-xs text-[#27272A] dark:text-[#E6E2DA] cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={profile.frameoIaEnabled !== false}
+                        onChange={(e) =>
+                          setProfile((prev) => ({
+                            ...prev,
+                            frameoIaEnabled: e.target.checked,
+                          }))
+                        }
+                        className="rounded border-[#D6D1C7] dark:border-white/20 bg-[#FFFFFF] dark:bg-[#14141B] text-[#E5A93C]"
+                      />
+                      <span>Activar ArthurAgent · Frameo IA</span>
+                    </label>
+                    <label className="inline-flex items-center gap-2 text-xs text-[#27272A] dark:text-[#E6E2DA] cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={profile.frameoIaAutoGenerateVideo !== false}
+                        onChange={(e) =>
+                          setProfile((prev) => ({
+                            ...prev,
+                            frameoIaAutoGenerateVideo: e.target.checked,
+                          }))
+                        }
+                        className="rounded border-[#D6D1C7] dark:border-white/20 bg-[#FFFFFF] dark:bg-[#14141B] text-[#E5A93C]"
+                      />
+                      <span>Generar video en Frameo IA al producir</span>
+                    </label>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                  <div>
+                    <label
+                      htmlFor="frameo-model-select"
+                      className="block text-[11px] font-medium text-[#57534E] dark:text-[#9A968E] mb-1"
+                    >
+                      Modelo Frameo.AI
+                    </label>
+                    <select
+                      id="frameo-model-select"
+                      value={profile.frameoIaModel || FRAMEO_MODEL_CATALOG[0]}
+                      onChange={(e) =>
+                        setProfile((prev) => ({ ...prev, frameoIaModel: e.target.value }))
+                      }
+                      className="w-full rounded-lg border border-[#D6D1C7] dark:border-white/12 bg-[#FFFFFF] dark:bg-[#14141B] px-3 py-2 text-xs text-[#18181B] dark:text-[#F2F0EB] focus:border-[#E5A93C] focus:outline-none"
+                    >
+                      {FRAMEO_MODEL_CATALOG.map((m) => (
+                        <option key={m} value={m}>
+                          {m}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div>
+                    <label
+                      htmlFor="frameo-vfx-manto-select"
+                      className="block text-[11px] font-medium text-[#57534E] dark:text-[#9A968E] mb-1"
+                    >
+                      VFX Studio (Agente Manto)
+                    </label>
+                    <select
+                      id="frameo-vfx-manto-select"
+                      value={profile.frameoIaVfxMode || FRAMEO_VFX_MANTO_MODES[0]}
+                      onChange={(e) =>
+                        setProfile((prev) => ({ ...prev, frameoIaVfxMode: e.target.value }))
+                      }
+                      className="w-full rounded-lg border border-[#D6D1C7] dark:border-white/12 bg-[#FFFFFF] dark:bg-[#14141B] px-3 py-2 text-xs text-[#18181B] dark:text-[#F2F0EB] focus:border-[#E5A93C] focus:outline-none"
+                    >
+                      {FRAMEO_VFX_MANTO_MODES.map((mode) => (
+                        <option key={mode} value={mode}>
+                          {mode}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div>
+                    <label
+                      htmlFor="frameo-render-quality-select"
+                      className="block text-[11px] font-medium text-[#57534E] dark:text-[#9A968E] mb-1"
+                    >
+                      Flujo de Renderizado Frameo
+                    </label>
+                    <select
+                      id="frameo-render-quality-select"
+                      value={profile.frameoIaRenderQuality || '480p_preview'}
+                      onChange={(e) =>
+                        setProfile((prev) => ({
+                          ...prev,
+                          frameoIaRenderQuality:
+                            e.target.value === 'full_hd' ? 'full_hd' : '480p_preview',
+                        }))
+                      }
+                      className="w-full rounded-lg border border-[#D6D1C7] dark:border-white/12 bg-[#FFFFFF] dark:bg-[#14141B] px-3 py-2 text-xs text-[#18181B] dark:text-[#F2F0EB] focus:border-[#E5A93C] focus:outline-none"
+                    >
+                      <option value="480p_preview">Vista previa rápida 480P (Look Check)</option>
+                      <option value="full_hd">Renderizar a resolución completa</option>
+                    </select>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                  <div>
+                    <label
+                      htmlFor="frameo-preset-select"
+                      className="block text-[11px] font-medium text-[#57534E] dark:text-[#9A968E] mb-1"
+                    >
+                      Preset Visual Frameo IA
+                    </label>
+                    <select
+                      id="frameo-preset-select"
+                      value={profile.frameoIaStylePreset || FRAMEO_STYLE_PRESETS[0]}
+                      onChange={(e) =>
+                        setProfile((prev) => ({ ...prev, frameoIaStylePreset: e.target.value }))
+                      }
+                      className="w-full rounded-lg border border-[#D6D1C7] dark:border-white/12 bg-[#FFFFFF] dark:bg-[#14141B] px-3 py-2 text-xs text-[#18181B] dark:text-[#F2F0EB] focus:border-[#E5A93C] focus:outline-none"
+                    >
+                      {FRAMEO_STYLE_PRESETS.map((preset) => (
+                        <option key={preset} value={preset}>
+                          {preset}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div>
+                    <label
+                      htmlFor="frameo-ratio-select"
+                      className="block text-[11px] font-medium text-[#57534E] dark:text-[#9A968E] mb-1"
+                    >
+                      Formato Frameo IA
+                    </label>
+                    <select
+                      id="frameo-ratio-select"
+                      value={profile.frameoIaAspectRatio || '16:9'}
+                      onChange={(e) =>
+                        setProfile((prev) => ({ ...prev, frameoIaAspectRatio: e.target.value }))
+                      }
+                      className="w-full rounded-lg border border-[#D6D1C7] dark:border-white/12 bg-[#FFFFFF] dark:bg-[#14141B] px-3 py-2 text-xs font-mono-tech text-[#18181B] dark:text-[#F2F0EB] focus:border-[#E5A93C] focus:outline-none"
+                    >
+                      <option value="16:9">16:9 Cine Digital</option>
+                      <option value="9:16">9:16 Reel / Mini-Drama</option>
+                      <option value="2.39:1">2.39:1 Panavision Scope</option>
+                      <option value="1:1">1:1 Cuadrado</option>
+                    </select>
+                  </div>
+
+                  <div>
+                    <label
+                      htmlFor="frameo-clip-duration"
+                      className="block text-[11px] font-medium text-[#57534E] dark:text-[#9A968E] mb-1"
+                    >
+                      Duración por Clip Frameo
+                    </label>
+                    <select
+                      id="frameo-clip-duration"
+                      value={profile.frameoIaClipDurationSec || 5}
+                      onChange={(e) =>
+                        setProfile((prev) => ({
+                          ...prev,
+                          frameoIaClipDurationSec: Number(e.target.value),
+                        }))
+                      }
+                      className="w-full rounded-lg border border-[#D6D1C7] dark:border-white/12 bg-[#FFFFFF] dark:bg-[#14141B] px-3 py-2 text-xs font-mono-tech text-[#18181B] dark:text-[#F2F0EB] focus:border-[#E5A93C] focus:outline-none"
+                    >
+                      <option value={4}>4 segundos</option>
+                      <option value={5}>5 segundos</option>
+                      <option value={6}>6 segundos</option>
+                      <option value={8}>8 segundos</option>
+                      <option value={10}>10 segundos</option>
+                    </select>
+                  </div>
+                </div>
+
+                <div className="flex flex-wrap items-center justify-between gap-3 pt-1">
+                  <span className="text-[11px] font-mono-tech text-[#57534E] dark:text-[#8D8981]">
+                    Nomenclatura de tomas:{' '}
+                    {buildFrameoShotFilename(
+                      activeProject?.title || 'AUTEUR',
+                      activeSequence?.chapterIndex || 1,
+                      1,
+                      1
+                    )}
+                  </span>
+                  <button
+                    type="submit"
+                    disabled={savingProfile}
+                    className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg bg-[#E5A93C] hover:bg-[#EDA949] disabled:opacity-60 text-[#0B0B0E] text-xs font-semibold"
+                  >
+                    <Save className="w-3.5 h-3.5" />
+                    <span>{savingProfile ? 'Guardando...' : 'Guardar configuración Frameo IA'}</span>
+                  </button>
+                </div>
+              </form>
+
+              {/* Generate / View Frameo IA Production Package */}
+              <div className="p-4 rounded-xl border border-amber-500/40 dark:border-[#E5A93C]/35 bg-amber-50/70 dark:bg-[#16130D] space-y-4">
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <div>
+                    <h3 className="text-xs font-semibold text-[#18181B] dark:text-[#F2F0EB]">
+                      Paquete Frameo IA de la Secuencia Activa
+                    </h3>
+                    <p className="text-[11px] text-[#57534E] dark:text-[#8D8981] mt-0.5">
+                      {activeProject && activeSequence
+                        ? `${activeProject.title} · ${activeSequence.title}`
+                        : 'Carga el proyecto de auditoría o crea una secuencia para generar el paquete Frameo IA.'}
+                    </p>
+                  </div>
+                  <div className="flex flex-wrap items-center gap-2">
+                    {!activeSequence && (
+                      <button
+                        type="button"
+                        onClick={handleSeedAuditProject}
+                        disabled={seedingProject}
+                        className="px-3 py-2 rounded-lg border border-[#D6D1C7] dark:border-white/15 bg-[#FFFFFF] dark:bg-[#181822] text-xs font-medium text-[#18181B] dark:text-[#F2F0EB]"
+                      >
+                        {seedingProject ? 'Cargando...' : 'Cargar proyecto de auditoría'}
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      onClick={() => void handleGenerateFrameoPackage()}
+                      disabled={generatingFrameo || !activeSequence}
+                      className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg bg-[#E5A93C] hover:bg-[#EDA949] disabled:opacity-50 text-[#0B0B0E] text-xs font-semibold"
+                    >
+                      <Sparkles className="w-3.5 h-3.5" />
+                      <span>
+                        {generatingFrameo
+                          ? 'Generando paquete...'
+                          : 'Generar / Actualizar Paquete Frameo IA'}
+                      </span>
+                    </button>
+                  </div>
+                </div>
+
+                {activeSequence?.frameoProductionSpec && (
+                  <div className="space-y-4">
+                    <div className="flex flex-wrap items-center justify-between gap-2 pt-2 border-t border-amber-500/25 dark:border-white/10">
+                      <span className="text-[11px] font-mono-tech text-amber-800 dark:text-[#E5A93C]">
+                        {activeSequence.frameoProductionSpec.engine} ·{' '}
+                        {activeSequence.frameoProductionSpec.modelName || 'Veo 3.1 Rápido'} ·{' '}
+                        {activeSequence.frameoProductionSpec.scenes.length} escenas ·{' '}
+                        {activeSequence.frameoProductionSpec.shotNamingTemplate || 'AUT_EP01_SH001_v001.mov'}
+                      </span>
+                      <div className="flex flex-wrap gap-2">
+                        <button
+                          type="button"
+                          onClick={() =>
+                            void handleCopyText(
+                              'frameo-json',
+                              JSON.stringify(activeSequence.frameoProductionSpec, null, 2)
+                            )
+                          }
+                          className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-md border border-[#D6D1C7] dark:border-white/15 bg-[#FFFFFF] dark:bg-[#111116] text-[11px] font-medium text-[#18181B] dark:text-[#F2F0EB]"
+                        >
+                          {copiedKey === 'frameo-json' ? (
+                            <Check className="w-3 h-3 text-teal-600" />
+                          ) : (
+                            <Copy className="w-3 h-3 text-amber-600 dark:text-[#E5A93C]" />
+                          )}
+                          <span>Copiar JSON Frameo IA</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const spec = activeSequence.frameoProductionSpec!;
+                            const txt = [
+                              `GUÍA FRAMEO IA · ${activeProject?.title || ''} / ${activeSequence.title}`,
+                              `Modelo: ${spec.modelName || 'Veo 3.1 Rápido'} | Preset: ${spec.stylePreset} | ${spec.aspectRatio} | ${spec.clipDurationSec}s`,
+                              `VFX Manto: ${spec.vfxMantoMode || 'Estándar'} | Toma: ${spec.shotNamingTemplate || 'EP01_SH001_v001.mov'}`,
+                              '',
+                              spec.workflowChecklist.join('\n'),
+                              '',
+                              ...spec.scenes.map(
+                                (s) =>
+                                  `=== ESCENA ${s.sceneNumber}: ${s.sceneLabel} (${s.shotRef}) ===\nCharacter Anchor: ${s.characterAnchor}\nVisual Prompt: ${s.frameoVisualPrompt}\nMotion Prompt (${s.durationSec}s): ${s.frameoMotionPrompt}\nAudio/VO: ${s.narrationOrDialogue}`
+                              ),
+                            ].join('\n\n');
+                            void handleCopyText('frameo-guide', txt);
+                          }}
+                          className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-md border border-[#D6D1C7] dark:border-white/15 bg-[#FFFFFF] dark:bg-[#111116] text-[11px] font-medium text-[#18181B] dark:text-[#F2F0EB]"
+                        >
+                          {copiedKey === 'frameo-guide' ? (
+                            <Check className="w-3 h-3 text-teal-600" />
+                          ) : (
+                            <Copy className="w-3 h-3 text-amber-600 dark:text-[#E5A93C]" />
+                          )}
+                          <span>Copiar Guía Completa Frameo IA</span>
+                        </button>
+                      </div>
+                    </div>
+
+                    <div className="p-3 rounded-lg border border-[#E2DDD3] dark:border-white/10 bg-[#FFFFFF] dark:bg-[#0B0B0E] space-y-1 text-[11px] text-[#3F3F46] dark:text-[#C8C3BA]">
+                      {activeSequence.frameoProductionSpec.workflowChecklist.map((step, i) => (
+                        <div key={i}>{step}</div>
+                      ))}
+                    </div>
+
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                      {activeSequence.frameoProductionSpec.scenes.map((sc) => (
+                        <div
+                          key={sc.sceneNumber}
+                          className="p-3.5 rounded-lg border border-[#DCD6CA] dark:border-white/10 bg-[#FFFFFF] dark:bg-[#0D0D12] space-y-2 text-xs"
+                        >
+                          <div className="flex items-center justify-between gap-2">
+                            <span className="font-semibold text-[#18181B] dark:text-[#F2F0EB]">
+                              Escena {sc.sceneNumber}: {sc.sceneLabel}
+                            </span>
+                            <span className="font-mono-tech text-[11px] text-amber-700 dark:text-[#E5A93C]">
+                              {sc.shotRef} · {sc.durationSec}s
+                            </span>
+                          </div>
+                          <div className="text-[11px] text-[#57534E] dark:text-[#9A968E]">
+                            <strong>Anclaje:</strong> {sc.characterAnchor}
+                          </div>
+                          <div className="space-y-1">
+                            <div className="flex items-center justify-between">
+                              <span className="text-[11px] font-medium text-[#3F3F46] dark:text-[#C8C3BA]">
+                                Visual Prompt
+                              </span>
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  void handleCopyText(`f-vis-${sc.sceneNumber}`, sc.frameoVisualPrompt)
+                                }
+                                className="text-[11px] text-amber-700 dark:text-[#E5A93C] hover:underline"
+                              >
+                                {copiedKey === `f-vis-${sc.sceneNumber}` ? 'Copiado' : 'Copiar'}
+                              </button>
+                            </div>
+                            <p className="text-[11px] font-mono-tech text-[#27272A] dark:text-[#D4CFC7] leading-relaxed">
+                              {sc.frameoVisualPrompt}
+                            </p>
+                          </div>
+                          <div className="space-y-1">
+                            <div className="flex items-center justify-between">
+                              <span className="text-[11px] font-medium text-[#3F3F46] dark:text-[#C8C3BA]">
+                                Motion Prompt
+                              </span>
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  void handleCopyText(`f-mot-${sc.sceneNumber}`, sc.frameoMotionPrompt)
+                                }
+                                className="text-[11px] text-amber-700 dark:text-[#E5A93C] hover:underline"
+                              >
+                                {copiedKey === `f-mot-${sc.sceneNumber}` ? 'Copiado' : 'Copiar'}
+                              </button>
+                            </div>
+                            <p className="text-[11px] font-mono-tech text-[#27272A] dark:text-[#D4CFC7] leading-relaxed">
+                              {sc.frameoMotionPrompt}
+                            </p>
+                          </div>
+                          <div className="text-[11px] text-teal-700 dark:text-[#5EEAD4]">
+                            {sc.narrationOrDialogue}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* Optional Private Admin REST / Token Connector for Frameo-compatible API */}
+              <form
+                onSubmit={handleSaveFrameoConnector}
+                className="p-4 rounded-xl border border-[#E2DDD3] dark:border-white/10 bg-[#FAF8F4] dark:bg-[#0B0B0E] space-y-3"
+              >
+                <div className="flex items-center justify-between gap-2">
+                  <div className="flex items-center gap-2 text-xs font-semibold text-[#18181B] dark:text-[#F2F0EB]">
+                    <PlugZap className="w-4 h-4 text-amber-600 dark:text-[#E5A93C]" />
+                    <span>Conector Manual MCP / REST Frameo IA (Token o Endpoint Privado)</span>
+                  </div>
+                  {frameoConnSummary?.configured && (
+                    <span className="text-[11px] font-mono-tech text-teal-700 dark:text-[#5EEAD4]">
+                      {frameoConnSummary.label} ({frameoConnSummary.keyPreview || 'Configurado'})
+                    </span>
+                  )}
+                </div>
+                <p className="text-[11px] text-[#57534E] dark:text-[#8D8981]">
+                  Usa <code>https://mcp.frameo.ai/mcp</code> con token Bearer o indica un endpoint REST privado compatible con Frameo IA.
+                </p>
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-2.5">
+                  <input
+                    type="url"
+                    aria-label="URL Endpoint Frameo IA"
+                    value={frameoEndpointUrl}
+                    onChange={(e) => setFrameoEndpointUrl(e.target.value)}
+                    placeholder="https://mcp.frameo.ai/mcp"
+                    className="rounded-lg border border-[#D6D1C7] dark:border-white/12 bg-[#FFFFFF] dark:bg-[#14141B] px-3 py-2 text-xs text-[#18181B] dark:text-[#F2F0EB] focus:border-[#E5A93C] focus:outline-none"
+                  />
+                  <input
+                    type="password"
+                    aria-label="Clave API Frameo IA"
+                    value={frameoApiKey}
+                    onChange={(e) => setFrameoApiKey(e.target.value)}
+                    placeholder="Token Bearer MCP o API Key privada"
+                    className="rounded-lg border border-[#D6D1C7] dark:border-white/12 bg-[#FFFFFF] dark:bg-[#14141B] px-3 py-2 text-xs text-[#18181B] dark:text-[#F2F0EB] focus:border-[#E5A93C] focus:outline-none"
+                  />
+                  <input
+                    type="text"
+                    aria-label="Modelo Frameo IA"
+                    value={frameoModelName}
+                    onChange={(e) => setFrameoModelName(e.target.value)}
+                    placeholder="Veo 3.1 Rápido"
+                    className="rounded-lg border border-[#D6D1C7] dark:border-white/12 bg-[#FFFFFF] dark:bg-[#14141B] px-3 py-2 text-xs font-mono-tech text-[#18181B] dark:text-[#F2F0EB] focus:border-[#E5A93C] focus:outline-none"
+                  />
+                </div>
+                <div className="flex flex-wrap items-center justify-end gap-2">
+                  <button
+                    type="submit"
+                    disabled={savingFrameoConn}
+                    className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg border border-amber-500/45 dark:border-[#E5A93C]/40 bg-amber-50 hover:bg-amber-100 dark:bg-[#1B1812] dark:hover:bg-[#272116] text-xs font-semibold text-[#18181B] dark:text-[#F2F0EB]"
+                  >
+                    <PlugZap className="w-3.5 h-3.5 text-amber-600 dark:text-[#E5A93C]" />
+                    <span>{savingFrameoConn ? 'Conectando...' : 'Guardar conector privado Frameo IA'}</span>
+                  </button>
+                </div>
+              </form>
             </div>
           )}
         </div>

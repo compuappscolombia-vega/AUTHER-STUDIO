@@ -56,7 +56,10 @@ function stripUndefined<T>(value: T): T {
 const inFlightProfileSync = new Map<string, Promise<void>>();
 
 export async function ensureUserProfileInFirestore(user: User): Promise<void> {
-  if (!user.emailVerified) return;
+  const isGoogleProvider = Boolean(
+    user.providerData?.some((provider) => provider?.providerId === 'google.com')
+  );
+  if (!user.emailVerified && !isGoogleProvider) return;
   const userId = sanitizeId(user.uid);
   const existing = inFlightProfileSync.get(userId);
   if (existing) {
@@ -175,6 +178,8 @@ export async function saveSequenceToFirestore(
       screenplay: sequence.screenplay,
       screenplayNotes: sequence.screenplayNotes || [],
       storyboardFrames: sequence.storyboardFrames,
+      productionEngine: sequence.productionEngine || 'standard',
+      frameoProductionSpec: sequence.frameoProductionSpec || null,
     });
 
     if (!snap.exists()) {
@@ -326,6 +331,11 @@ export async function loadUserProjectsFromFirestore(
           storyboardFrames:
             (data.storyboardFrames as ProductionSequence['storyboardFrames']) || [],
           continuitySummary: String(s.continuitySummary || ''),
+          productionEngine:
+            data.productionEngine === 'frameo_ia' ? 'frameo_ia' : undefined,
+          frameoProductionSpec:
+            (data.frameoProductionSpec as ProductionSequence['frameoProductionSpec']) ||
+            undefined,
           createdAt: toIsoString(s.createdAt),
           updatedAt: toIsoString(s.updatedAt),
         };

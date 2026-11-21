@@ -74,5 +74,27 @@ describe('apiProviders security & auto-detection', () => {
     });
     assert.equal(customFree.providerKind, 'custom_rest');
     assert.equal(customFree.tier, 'free');
+
+    const frameoCustom = detectApiProviderSpec({
+      capability: 'frameo_video',
+      endpointUrl: 'https://frameo-engine.example.com/v1/generate',
+      tierHint: 'paid',
+    });
+    assert.equal(frameoCustom.capability, 'frameo_video');
+    assert.equal(frameoCustom.providerKind, 'custom_rest');
+    assert.equal(frameoCustom.model, 'frameo-cinema-v1');
+    assert.equal(frameoCustom.supportsImageToVideo, true);
+    assert.match(frameoCustom.label, /Frameo IA/);
+
+    const frameoMcp = detectApiProviderSpec({
+      capability: 'frameo_video',
+      endpointUrl: 'https://mcp.frameo.ai/mcp',
+      tierHint: 'paid',
+    });
+    assert.equal(frameoMcp.providerKind, 'frameo_mcp');
+    assert.equal(frameoMcp.endpointUrl, 'https://mcp.frameo.ai/mcp');
+    assert.equal(frameoMcp.supportsImageToVideo, true);
+    assert.match(frameoMcp.label, /MCP/i);
   });
 });
+

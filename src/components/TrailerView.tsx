@@ -39,6 +39,7 @@ interface TrailerViewProps {
   userId: string;
   project: ProductionProject;
   studioSettings: StudioSettings;
+  adminToken?: string | null;
   providersStatus?: Record<ApiCapability, ApiProviderPublicSummary> | null;
   onEnsureProjectSynced: () => Promise<void>;
   onProjectUpdated: (project: ProductionProject) => Promise<void>;
@@ -50,6 +51,7 @@ export function TrailerView({
   userId,
   project,
   studioSettings,
+  adminToken,
   providersStatus,
   onEnsureProjectSynced,
   onProjectUpdated,
@@ -87,7 +89,12 @@ export function TrailerView({
 
   useEffect(() => {
     let cancelled = false;
-    fetch('/api/providers', { headers: { 'x-user-id': userId } })
+    fetch('/api/providers', {
+      headers: {
+        'x-user-id': userId,
+        ...(adminToken ? { Authorization: `Bearer ${adminToken}` } : {}),
+      },
+    })
       .then((r) => (r.ok ? r.json() : null))
       .then((d: { providers?: Record<ApiCapability, ApiProviderPublicSummary> } | null) => {
         if (!cancelled && d?.providers) setLocalProviders(d.providers);
@@ -96,7 +103,7 @@ export function TrailerView({
     return () => {
       cancelled = true;
     };
-  }, [userId]);
+  }, [userId, adminToken]);
 
   const activeImgProv = localProviders?.image;
   const activeVidProv = localProviders?.video;
@@ -183,7 +190,10 @@ export function TrailerView({
     for (let attempt = 0; attempt < 95; attempt++) {
       await new Promise((resolve) => setTimeout(resolve, 2500));
       const res = await fetch(`/api/video-jobs/${encodeURIComponent(jobId)}`, {
-        headers: { 'x-user-id': userId },
+        headers: {
+          'x-user-id': userId,
+          ...(adminToken ? { Authorization: `Bearer ${adminToken}` } : {}),
+        },
       });
       const data = await parseApiResponse<{
         status: 'pending' | 'completed' | 'failed';
@@ -213,6 +223,7 @@ export function TrailerView({
         headers: {
           'Content-Type': 'application/json',
           'x-user-id': userId,
+          ...(adminToken ? { Authorization: `Bearer ${adminToken}` } : {}),
         },
         body: JSON.stringify({
           projectId: project.id,
